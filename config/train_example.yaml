@@ -8,7 +8,7 @@ log_interval: 1  # how often to print to the console (1 = every iteration)
 always_save_checkpoint: False
 
 dataset: "out/my_cifs"
-batch_size: 64
+batch_size: 32
 block_size: 2048  # context of up to `block_size` previous characters
 
 # architecture
