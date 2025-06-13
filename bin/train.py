@@ -63,6 +63,7 @@ class TrainDefaults:
     device: str = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
     dtype: str = "bfloat16"  # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
     compile: bool = True  # use PyTorch 2.0 to compile the model to be faster
+    backend: str = "nccl"
     underrep_p: float = 0.0
     validate: bool = False  # whether to evaluate the model using the validation set
 
@@ -97,7 +98,18 @@ if __name__ == "__main__":
     print(f"Creating {C.out_dir}...")
     os.makedirs(C.out_dir, exist_ok=True)
 
-    torch.manual_seed(1337)
+    torch.distributed.init_process_group(backend=C.backend)
+    ddp_rank = int(os.environ.get("RANK", 0))
+    ddp_world_size = int(os.environ.get("WORLD_SIZE", 1))
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    device = f"cuda:{local_rank}" if "cuda" in C.device else C.device
+    torch.cuda.set_device(device)
+    C.device = device
+    seed_offset = ddp_rank
+
+    master_process = ddp_rank == 0
+
+    torch.manual_seed(1337 + seed_offset)
     torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
     torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
     device_type = "cuda" if "cuda" in C.device else "cpu"  # for later use in torch.autocast
@@ -177,7 +189,7 @@ if __name__ == "__main__":
     elif C.init_from == "resume":
         print(f"Resuming training from {C.out_dir}...")
         ckpt_path = os.path.join(C.out_dir, "ckpt.pt")
-        checkpoint = torch.load(ckpt_path, map_location=C.device)
+        checkpoint = torch.load(ckpt_path, map_location="cpu")
         checkpoint_model_args = checkpoint["model_args"]
         # force these config attributes to be equal otherwise we can't even resume training;
         #  the rest of the attributes (e.g. dropout) can stay as desired
@@ -212,6 +224,8 @@ if __name__ == "__main__":
         print("Compiling the model (takes a ~minute)...")
         unoptimized_model = model
         model = torch.compile(model)  # requires PyTorch 2.0
+
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
 
     # helps estimate an arbitrarily accurate loss over either split using many batches
     @torch.no_grad()
@@ -257,22 +271,27 @@ if __name__ == "__main__":
 
         # evaluate the loss on train/val sets and write checkpoints
         if iter_num % C.eval_interval == 0:
-            if C.validate:
-                losses = estimate_loss()
-                print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-            if (C.validate and losses["val"] < best_val_loss) or C.always_save_checkpoint:
-                best_val_loss = losses["val"] if C.validate else 0.
-                if iter_num > 0:
-                    checkpoint = {
-                        "model": model.state_dict(),
-                        "optimizer": optimizer.state_dict(),
-                        "model_args": model_args,
-                        "iter_num": iter_num,
-                        "best_val_loss": best_val_loss,
-                        "config": dict(C),
-                    }
-                    print(f"saving checkpoint to {C.out_dir}...")
-                    torch.save(checkpoint, os.path.join(C.out_dir, "ckpt.pt"))
+            if master_process:
+                if C.validate:
+                    losses = estimate_loss()
+                    print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+                if (C.validate and losses["val"] < best_val_loss) or C.always_save_checkpoint:
+                    best_val_loss = losses["val"] if C.validate else 0.
+                    if iter_num > 0:
+                        state = model.module.state_dict()
+                        checkpoint = {
+                            "model": state,
+                            "optimizer": optimizer.state_dict(),
+                            "model_args": model_args,
+                            "iter_num": iter_num,
+                            "best_val_loss": best_val_loss,
+                            "config": dict(C),
+                        }
+                        print(f"saving checkpoint to {C.out_dir}...")
+                        torch.save(checkpoint, os.path.join(C.out_dir, "ckpt.pt"))
+            loss_tensor = torch.tensor(best_val_loss).to(C.device)
+            torch.distributed.broadcast(loss_tensor, src=0)
+            best_val_loss = loss_tensor.item()
         if iter_num == 0 and C.eval_only:
             break
 
@@ -299,10 +318,11 @@ if __name__ == "__main__":
         t1 = time.time()
         dt = t1 - t0
         t0 = t1
-        if iter_num % C.log_interval == 0:
+        if iter_num % C.log_interval == 0 and master_process:
             lossf = loss.item()  # loss as float. note: this is a CPU-GPU sync point
             if local_iter_num >= 5:  # let the training loop settle a bit
-                mfu = model.estimate_mfu(C.batch_size * C.gradient_accumulation_steps, dt)
+                mfu_src = model.module
+                mfu = mfu_src.estimate_mfu(C.batch_size * C.gradient_accumulation_steps * ddp_world_size, dt)
                 running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
             print(f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, mfu {running_mfu * 100:.2f}%")
         iter_num += 1
@@ -311,3 +331,5 @@ if __name__ == "__main__":
         # termination conditions
         if iter_num > C.max_iters:
             break
+
+torch.distributed.destroy_process_group()
