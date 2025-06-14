@@ -26,8 +26,8 @@ def progress_listener(queue, n):
         pbar.update(message)
 
 
-def tokenize(chunk_of_cifs, queue=None):
-    tokenizer = CIFTokenizer()
+def tokenize(chunk_of_cifs, num_amp_tokens=0, queue=None):
+    tokenizer = CIFTokenizer(num_amp_tokens=num_amp_tokens)
     tokenized = []
     for cif in tqdm(chunk_of_cifs, disable=queue is not None, desc="tokenizing..."):
         if queue:
@@ -65,12 +65,15 @@ if __name__ == "__main__":
                         help="Output directory to store processed files.")
     parser.add_argument("--workers", type=int, default=4,
                         help="Number of workers to use for processing.")
+    parser.add_argument("--num_amp_tokens", type=int, default=0,
+                        help="Number of <AMP*> tokens to include in tokenizer.")
     args = parser.parse_args()
 
     train_fname = args.train_fname
     val_fname = args.val_fname
     out_dir = args.out_dir
     workers = args.workers
+    num_amp_tokens = args.num_amp_tokens
 
     has_val = len(val_fname) > 0
 
@@ -103,7 +106,7 @@ if __name__ == "__main__":
     jobs = []
     for i in range(workers):
         chunk = chunks[i]
-        job = pool.apply_async(tokenize, (chunk, queue))
+        job = pool.apply_async(tokenize, (chunk, num_amp_tokens, queue))
         jobs.append(job)
 
     tokenized_cifs_train = []
@@ -123,7 +126,7 @@ if __name__ == "__main__":
 
     if has_val:
         # tokenize the validation CIFs
-        tokenized_cifs_val = tokenize(cifs_val)
+        tokenized_cifs_val = tokenize(cifs_val, num_amp_tokens)
 
         lens = [len(t) for t in tokenized_cifs_val]
         unk_counts = [t.count("<unk>") for t in tokenized_cifs_val]
@@ -143,7 +146,7 @@ if __name__ == "__main__":
             val_data.extend(t)
 
     print("encoding...")
-    tokenizer = CIFTokenizer()
+    tokenizer = CIFTokenizer(num_amp_tokens=num_amp_tokens)
     train_ids = tokenizer.encode(train_data)
     print(f"train has {len(train_ids):,} tokens")
     if has_val:

@@ -57,7 +57,7 @@ UNK_TOKEN = "<unk>"
 
 
 class CIFTokenizer:
-    def __init__(self):
+    def __init__(self, num_amp_tokens: int = 0):
         self._tokens = list(self.atoms())
         self._tokens.extend(self.digits())
         self._tokens.extend(self.keywords())
@@ -68,6 +68,9 @@ class CIFTokenizer:
         #  or 'P1' with 'P1_sg' to disambiguate from atom 'P' and number '1'
         space_groups_sg = [sg+"_sg" for sg in space_groups]
         self._tokens.extend(space_groups_sg)
+
+        if num_amp_tokens > 0:
+            self._tokens.extend([f"<AMP{i}>" for i in range(num_amp_tokens)])
 
         self._escaped_tokens = [re.escape(token) for token in self._tokens]
         self._escaped_tokens.sort(key=len, reverse=True)
