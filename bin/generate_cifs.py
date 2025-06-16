@@ -3,6 +3,7 @@ import argparse
 import io
 import tarfile
 import multiprocessing as mp
+import sys
 
 from tqdm import tqdm
 from contextlib import nullcontext
@@ -16,13 +17,19 @@ from crystallm import (
 )
 
 
-def progress_listener(queue, n):
-    pbar = tqdm(total=n, desc="generating CIFs from prompts...")
-    while True:
-        message = queue.get()
-        if message == "kill":
-            break
-        pbar.update(message)
+def write_listener(queue, n, out_file):
+    pbar = tqdm(total=n, desc="generating CIFs...")
+    with tarfile.open(out_file, "w:gz") as tar:
+        while True:
+            message = queue.get()
+            if message == "kill":
+                break
+            cif_id, cif_str = message
+            cif_info = tarfile.TarInfo(name=f"{cif_id}.cif")
+            cif_bytes = cif_str.encode("utf-8")
+            cif_info.size = len(cif_bytes)
+            tar.addfile(cif_info, io.BytesIO(cif_bytes))
+            pbar.update(1)
 
 
 def get_prompts_from_file(prompts_file):
@@ -38,7 +45,7 @@ def get_prompts_from_file(prompts_file):
     return prompts
 
 
-def generate(model_dir, seed, device, dtype, num_gens, temperature, top_k, max_new_tokens, chunk_of_prompts, queue):
+def generate(model_dir, seed, device, dtype, num_gens, temperature, top_k, max_new_tokens, num_amp_tokens, chunk_of_prompts, queue):
     # init torch
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -49,7 +56,7 @@ def generate(model_dir, seed, device, dtype, num_gens, temperature, top_k, max_n
     ctx = nullcontext() if device_type == "cpu" else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 
     # init tokenizer
-    tokenizer = CIFTokenizer()
+    tokenizer = CIFTokenizer(num_amp_tokens=num_amp_tokens)
     encode = tokenizer.encode
     decode = tokenizer.decode
 
@@ -68,20 +75,14 @@ def generate(model_dir, seed, device, dtype, num_gens, temperature, top_k, max_n
     model.to(device)
     model = torch.compile(model)  # requires PyTorch 2.0
 
-    generated = []
     with torch.no_grad():
         with ctx:
-            for id, prompt in chunk_of_prompts:
+            for cif_id, prompt in chunk_of_prompts:
                 start_ids = encode(tokenizer.tokenize_cif(prompt))
                 x = torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...]
-                gens = []
-                for _ in range(num_gens):
-                    y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
-                    output = decode(y[0].tolist())
-                    gens.append(output)
-                generated.append((id, gens))
-                queue.put(1)
-    return generated
+                y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+                output = decode(y[0].tolist())
+                queue.put((cif_id, output))
 
 
 """
@@ -106,13 +107,22 @@ if __name__ == "__main__":
                         help="The top-k value to use during sampling.")
     parser.add_argument("--max-new-tokens", type=int, default=3000,
                         help="The maximum number of tokens to generate per CIF.")
+    parser.add_argument("--num_amp_tokens", type=int, default=0,
+                        help="Number of <AMP*> tokens to include in tokenizer.")
     parser.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu"], help="The device to use.")
     parser.add_argument("--temperature", type=float, default=1.0, help="The sampling temperature.")
     parser.add_argument("--seed", type=int, default=1337, help="The random seed.")
     parser.add_argument("--dtype", type=str, default="bfloat16", choices=["float32", "bfloat16", "float16"],
                         help="The datatype to use.")
-    parser.add_argument("--num-gens", type=int, default=1,
-                        help="The number of times to generate for each CIF.")
+    parser.add_argument(
+        "--num-gens",
+        type=int,
+        default=1,
+        help=(
+            "Number of CIFs to generate when no prompts are provided. "
+            "Ignored when using the --prompts option."
+        ),
+    )
     parser.add_argument("--gpus", type=int,
                         help="The number of GPUs to use. "
                              "The number of GPUs specified must be available on the same machine.")
@@ -131,10 +141,18 @@ if __name__ == "__main__":
     out_file = args.out
     top_k = args.top_k
     max_new_tokens = args.max_new_tokens
+    num_amp_tokens = args.num_amp_tokens
     device = args.device
     temperature = args.temperature
     seed = args.seed
     dtype = args.dtype
+
+    if device.startswith("cuda") and dtype == "bfloat16" and not torch.cuda.is_bf16_supported():
+        print(
+            "WARNING: CUDA device does not support bfloat16; falling back to float16",
+            file=sys.stderr,
+        )
+        dtype = "float16"
     num_gens = args.num_gens
     gpus = args.gpus
 
@@ -146,15 +164,17 @@ if __name__ == "__main__":
 
     if ab_initio:
         prompts = [(i + 1, "data_") for i in range(num_gens)]
-        num_gens = 1
     else:
         prompts = get_prompts_from_file(prompts_file)
+
+    total_cifs = len(prompts)
+    print(f"will generate {total_cifs} CIFs")
 
     chunks = array_split(prompts, workers)
     manager = mp.Manager()
     queue = manager.Queue()
-    pool = mp.Pool(workers + 1)  # add an extra worker for the watcher
-    watcher = pool.apply_async(progress_listener, (queue, len(prompts),))
+    pool = mp.Pool(workers + 1)  # add an extra worker for writing
+    watcher = pool.apply_async(write_listener, (queue, total_cifs, out_file))
 
     jobs = []
     for i in range(workers):
@@ -163,22 +183,25 @@ if __name__ == "__main__":
         worker_seed = (seed + i) if ab_initio else seed
         job = pool.apply_async(
             generate,
-            (model_dir, worker_seed, dev, dtype, num_gens, temperature, top_k, max_new_tokens, chunk, queue)
+            (
+                model_dir,
+                worker_seed,
+                dev,
+                dtype,
+                num_gens,
+                temperature,
+                top_k,
+                max_new_tokens,
+                num_amp_tokens,
+                chunk,
+                queue,
+            ),
         )
         jobs.append(job)
 
-    generated = []
     for job in jobs:
-        generated.extend(job.get())
+        job.get()
 
     queue.put("kill")
     pool.close()
     pool.join()
-
-    with tarfile.open(out_file, "w:gz") as tar:
-        for id, gens in tqdm(generated, desc=f"writing CIF files to {out_file}..."):
-            for i, cif in enumerate(gens):
-                cif_file = tarfile.TarInfo(name=f"{id}__{i+1}.cif")
-                cif_bytes = cif.encode("utf-8")
-                cif_file.size = len(cif_bytes)
-                tar.addfile(cif_file, io.BytesIO(cif_bytes))

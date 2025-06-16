@@ -122,7 +122,7 @@ class CIFTokenizer:
 
     def decode(self, ids):
         # decoder: take a list of integers (i.e. encoded tokens), output a string
-        return ''.join([self._id_to_token[i] for i in ids])
+        return ''.join([self._id_to_token.get(i, UNK_TOKEN) for i in ids])
 
     def tokenize_cif(self, cif_string, single_spaces=True):
         # Preprocessing step to replace '_symmetry_space_group_name_H-M Pm'

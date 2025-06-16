@@ -2,6 +2,8 @@ import os
 import argparse
 from collections import Counter
 import tarfile
+import gzip
+import pickle
 
 import numpy as np
 import itertools
@@ -323,21 +325,31 @@ def get_comp_scaler_means_stds():
 
 
 def extract_cif_id(filepath):
-    """
-    Parses a filename assumed to be in the format "id__n.cif",
-    returning the "id".
+    """Extract the structure identifier from a CIF filename.
 
-    :param filepath: a filename assumed to be in the format "id__n.cif"
-    :return: the extracted values of `id`
+    The previous format for generated CIFs used names of the form
+    ``id__n.cif`` when multiple structures were produced for a single
+    prompt. Newer scripts may instead output a single structure as
+    ``id.cif``.  This helper handles both conventions and simply
+    returns the part before the ``__`` (if present) and without the
+    ``.cif`` suffix.
+
+    Parameters
+    ----------
+    filepath : str
+        The path or name of the CIF file.
+
+    Returns
+    -------
+    str
+        The extracted identifier.
     """
+
     filename = os.path.basename(filepath)
-    # split from the right, once
-    parts = filename.rsplit("__", 1)
-    if len(parts) == 2:
-        id_part, _ = parts
-        return id_part
-    else:
-        raise ValueError(f"'{filename}' does not conform to expected format 'id__n.cif'")
+    base = filename[:-4] if filename.endswith(".cif") else filename
+    if "__" in base:
+        base = base.split("__", 1)[0]
+    return base
 
 
 def read_generated_cifs(input_path):
@@ -355,27 +367,56 @@ def read_generated_cifs(input_path):
 
 
 def read_true_cifs(input_path):
+    """Read reference CIFs from a tarball or pickle file."""
+
     true_cifs = {}
-    with tarfile.open(input_path, "r:gz") as tar:
-        for member in tqdm(tar.getmembers(), desc="extracting true CIFs..."):
-            f = tar.extractfile(member)
-            if f is not None:
-                cif = f.read().decode("utf-8")
-                filename = os.path.basename(member.name)
-                cif_id = filename.replace(".cif", "")
-                true_cifs[cif_id] = cif
-    return true_cifs
+
+    try:
+        with tarfile.open(input_path, "r:*") as tar:
+            for member in tqdm(tar.getmembers(), desc="extracting true CIFs..."):
+                f = tar.extractfile(member)
+                if f is not None:
+                    cif = f.read().decode("utf-8")
+                    filename = os.path.basename(member.name)
+                    cif_id = filename.replace(".cif", "")
+                    true_cifs[cif_id] = cif
+        return true_cifs
+    except tarfile.TarError:
+        print(f"{input_path} does not appear to be a tar archive; trying pickle format")
+        if input_path.endswith(".gz"):
+            opener = gzip.open
+        else:
+            opener = open
+        with opener(input_path, "rb") as f:
+            entries = pickle.load(f)
+        for cif_id, cif_str in entries:
+            true_cifs[cif_id] = cif_str
+        return true_cifs
 
 
-def get_structs(id_to_gen_cifs, id_to_true_cifs, n_gens, length_lo, length_hi, angle_lo, angle_hi):
+def get_structs(
+    id_to_gen_cifs,
+    id_to_true_cifs,
+    n_gens,
+    length_lo,
+    length_hi,
+    angle_lo,
+    angle_hi,
+    limit=None,
+):
     gen_structs = []
     true_structs = []
-    for id, cifs in tqdm(id_to_gen_cifs.items(), desc="converting CIFs to Structures..."):
-        if id not in id_to_true_cifs:
-            raise Exception(f"could not find ID `{id}` in true CIFs")
+
+    ids = sorted(set(id_to_gen_cifs) & set(id_to_true_cifs))
+    if limit is not None:
+        ids = ids[:limit]
+
+    for id in tqdm(ids, desc="converting CIFs to Structures..."):
+        cifs = id_to_gen_cifs[id]
 
         structs = []
-        for cif in cifs[:n_gens]:
+        subset = cifs if n_gens is None else cifs[:n_gens]
+        for cif in subset:
             try:
                 if not is_sensible(cif, length_lo, length_hi, angle_lo, angle_hi):
                     continue
@@ -488,6 +529,14 @@ if __name__ == "__main__":
     id_to_gen_cifs = read_generated_cifs(gen_cifs_path)
     id_to_true_cifs = read_true_cifs(true_cifs_path)
 
+    limit = None
+    if len(id_to_gen_cifs) != len(id_to_true_cifs):
+        limit = min(len(id_to_gen_cifs), len(id_to_true_cifs))
+        print(
+            f"generated CIFs: {len(id_to_gen_cifs)}; reference CIFs: {len(id_to_true_cifs)}. "
+            f"Comparing the first {limit} structures."
+        )
+
     if unconditional:
         np.random.seed(seed)
         comp_scaler_means, comp_scaler_stds = get_comp_scaler_means_stds()
@@ -504,7 +553,14 @@ if __name__ == "__main__":
         metrics = get_unconditional_metrics(gen_structs, gen_comps, true_structs, n_gens, comp_scaler, cov_cutoffs)
     else:
         gen_structs, true_structs = get_structs(
-            id_to_gen_cifs, id_to_true_cifs, n_gens, length_lo, length_hi, angle_lo, angle_hi
+            id_to_gen_cifs,
+            id_to_true_cifs,
+            n_gens,
+            length_lo,
+            length_hi,
+            angle_lo,
+            angle_hi,
+            limit,
         )
         metrics = get_match_rate_and_rms(gen_structs, true_structs, struct_matcher)
 
