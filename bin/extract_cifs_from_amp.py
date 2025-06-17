@@ -5,6 +5,10 @@ import tarfile
 import io
 import os
 
+def load_entries_from_pkl(pkl_fname):
+    with gzip.open(pkl_fname, "rb") as f:
+        return pickle.load(f)
+
 
 def load_entries_from_tar(tar_fname):
     entries = []
@@ -19,7 +23,7 @@ def load_entries_from_tar(tar_fname):
                     entries.append((cif_id, text))
     return entries
 
-if __name__ == "__main__":
+def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Extract CIFs from AMP+structure dataset and write to .tar.gz"
     )
@@ -27,8 +31,13 @@ if __name__ == "__main__":
         "name",
         help="Path to input file (.pkl.gz or .tar.gz) containing AMP-prefixed CIFs",
     )
-    parser.add_argument("--out", "-o", required=True, help="Path to output .tar.gz file containing .cif files")
-    args = parser.parse_args()
+    parser.add_argument(
+        "--out",
+        "-o",
+        required=True,
+        help="Path to output .tar.gz file containing .cif files",
+    )
+    args = parser.parse_args(argv)
 
     if args.name.endswith(".pkl.gz"):
         entries = load_entries_from_pkl(args.name)
