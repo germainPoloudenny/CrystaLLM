@@ -78,10 +78,13 @@ def generate(model_dir, seed, device, dtype, num_gens, temperature, top_k, max_n
     with torch.no_grad():
         with ctx:
             for cif_id, prompt in chunk_of_prompts:
-                start_ids = encode(tokenizer.tokenize_cif(prompt))
+                start_tokens = tokenizer.tokenize_cif(prompt)
+                start_ids = encode(start_tokens)
                 x = torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...]
                 y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
-                output = decode(y[0].tolist())
+
+                gen_ids = y[0].tolist()[len(start_ids):]
+                output = decode(gen_ids)
                 queue.put((cif_id, output))
 
 
