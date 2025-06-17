@@ -1,4 +1,4 @@
-out_dir: 'out/amp'
+out_dir: 'out/amp_prefix'
 eval_interval: 250  # how often to evaluate against the validation set
 eval_iters_train: 200
 log_interval: 1  # how often to print to the console (1 = every iteration)
@@ -8,6 +8,8 @@ always_save_checkpoint: True
 
 # whether to validate with a validation set
 validate: True
+
+mask_amp_tokens: True
 
 dataset: 'tokens_mp20_amp'
 batch_size: 16

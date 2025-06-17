@@ -66,6 +66,7 @@ class TrainDefaults:
     backend: str = "nccl"
     underrep_p: float = 0.0
     validate: bool = False  # whether to evaluate the model using the validation set
+    mask_amp_tokens: bool = False  # ignore <AMP*> tokens when computing loss
 
 
 def read_start_indices(
@@ -123,6 +124,8 @@ if __name__ == "__main__":
     train_data = np.memmap(os.path.join(C.dataset, "train.bin"), dtype=np.uint16, mode="r")
     val_data = np.memmap(os.path.join(C.dataset, "val.bin"), dtype=np.uint16, mode="r") if C.validate else None
 
+    amp_token_ids = []
+
     cif_start_indices = read_start_indices(
         max_start_index=len(train_data) - C.block_size,
         data_dir=C.dataset,
@@ -159,6 +162,12 @@ if __name__ == "__main__":
         x = torch.stack([torch.from_numpy((data[i:i + C.block_size]).astype(np.int64)) for i in ix])
         y = torch.stack([torch.from_numpy((data[i + 1:i + 1 + C.block_size]).astype(np.int64)) for i in ix])
 
+        if C.mask_amp_tokens and amp_token_ids:
+            mask = torch.zeros_like(y, dtype=torch.bool)
+            for amp_id in amp_token_ids:
+                mask |= y == amp_id
+            y = y.masked_fill(mask, -1)
+
         if device_type == "cuda":
             # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
             x, y = x.pin_memory().to(C.device, non_blocking=True), y.pin_memory().to(C.device, non_blocking=True)
@@ -176,6 +185,8 @@ if __name__ == "__main__":
             meta = pickle.load(f)
         meta_vocab_size = meta["vocab_size"]
         print(f"Found vocab_size = {meta_vocab_size} (inside {meta_path})")
+        if C.mask_amp_tokens:
+            amp_token_ids = [idx for tok, idx in meta["stoi"].items() if tok.startswith("<AMP")]
 
     model_args = dict(n_layer=C.n_layer, n_head=C.n_head, n_embd=C.n_embd, block_size=C.block_size,
                       bias=C.bias, vocab_size=None, dropout=C.dropout)
