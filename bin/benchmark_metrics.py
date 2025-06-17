@@ -471,6 +471,25 @@ def get_true_structs_unconditional(id_to_true_cifs):
     return true_structs
 
 
+def show_cif_pairs(id_to_gen_cifs, id_to_true_cifs, n_gens=None, limit=None):
+    """Print generated CIFs alongside their reference CIFs."""
+
+    ids = sorted(set(id_to_gen_cifs) & set(id_to_true_cifs))
+    if limit is not None:
+        ids = ids[:limit]
+
+    for cif_id in ids:
+        print(f"== {cif_id} ==")
+        cifs = id_to_gen_cifs[cif_id]
+        subset = cifs if n_gens is None else cifs[:n_gens]
+        for i, cif in enumerate(subset):
+            print(f"-- generated #{i + 1} --")
+            print(cif)
+        print("-- reference --")
+        print(id_to_true_cifs[cif_id])
+        print()
+
+
 """
 This script performs the CDVAE and DiffCSP benchmark analysis, as described in:
 https://github.com/jiaor17/DiffCSP/blob/ee131b03a1c6211828e8054d837caa8f1a980c3e/scripts/compute_metrics.py.
@@ -502,6 +521,8 @@ if __name__ == "__main__":
                              "being computed. Default is 'perovskite'.")
     parser.add_argument("--seed", type=int, default=1337,
                         help="The random seed to use for the unconditional generation task metrics.")
+    parser.add_argument("--show-cifs", action="store_true",
+                        help="If set, print each generated CIF and its corresponding reference CIF")
     args = parser.parse_args()
 
     gen_cifs_path = args.gen_cifs
@@ -514,6 +535,7 @@ if __name__ == "__main__":
     unconditional = args.unconditional
     cov_cutoffs = args.cov_cutoffs
     seed = args.seed
+    show_cifs_flag = args.show_cifs
 
     if n_gens == 0:
         n_gens = None
@@ -536,6 +558,9 @@ if __name__ == "__main__":
             f"generated CIFs: {len(id_to_gen_cifs)}; reference CIFs: {len(id_to_true_cifs)}. "
             f"Comparing the first {limit} structures."
         )
+
+    if show_cifs_flag:
+        show_cif_pairs(id_to_gen_cifs, id_to_true_cifs, n_gens, limit)
 
     if unconditional:
         np.random.seed(seed)

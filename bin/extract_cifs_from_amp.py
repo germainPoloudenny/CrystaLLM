@@ -6,11 +6,6 @@ import io
 import os
 
 
-def load_entries_from_pkl(pkl_fname):
-    with gzip.open(pkl_fname, "rb") as f:
-        return pickle.load(f)
-
-
 def load_entries_from_tar(tar_fname):
     entries = []
     with tarfile.open(tar_fname, "r:gz") as tar:
@@ -61,3 +56,7 @@ if __name__ == "__main__":
             count += 1
 
     print(f"wrote {count} CIFs to {args.out}")
+
+
+if __name__ == "__main__":
+    main()
