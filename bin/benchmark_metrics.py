@@ -354,11 +354,22 @@ def extract_cif_id(filepath):
 
 def read_generated_cifs(input_path):
     generated_cifs = {}
+
+    def strip_prefix(text):
+        lines = text.splitlines()
+        start = 0
+        for i, line in enumerate(lines):
+            if line.lstrip().startswith("data_"):
+                start = i
+                break
+        return "\n".join(lines[start:])
+
     with tarfile.open(input_path, "r:gz") as tar:
         for member in tqdm(tar.getmembers(), desc="extracting generated CIFs..."):
             f = tar.extractfile(member)
             if f is not None:
                 cif = f.read().decode("utf-8")
+                cif = strip_prefix(cif)
                 cif_id = extract_cif_id(member.name)
                 if cif_id not in generated_cifs:
                     generated_cifs[cif_id] = []
