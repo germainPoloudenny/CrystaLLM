@@ -167,21 +167,8 @@ saved_models/
 .gitignore
 
 .
-cifs_v1_dedup.pkl.gz
-cifs_v1_orig.pkl.gz
-cifs_v1_orig.tar.gz
-cifs_v1_prep.pkl.gz
-cifs_v1_test.pkl.gz
-cifs_v1_train.pkl.gz
-cifs_v1_val.pkl.gz
 config/
-starts_v1_train.pkl
-tokens_v1_all/
-tokens_v1_train_val/
 
-tokens_mp20_amp
-mp20_amp_train.pkl.gz
-mp20_amp_val.pkl.gz
 
 jz/
 data/
