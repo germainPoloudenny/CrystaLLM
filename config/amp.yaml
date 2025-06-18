@@ -11,7 +11,7 @@ validate: True
 
 mask_amp_tokens: True
 
-dataset: 'tokens_mp20_amp'
+dataset: 'data/tokens_mp20_amp'
 batch_size: 16
 block_size: 2048
 

@@ -182,3 +182,6 @@ tokens_v1_train_val/
 tokens_mp20_amp
 mp20_amp_train.pkl.gz
 mp20_amp_val.pkl.gz
+
+jz/
+data/
