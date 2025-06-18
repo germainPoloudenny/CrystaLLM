@@ -67,6 +67,7 @@ class TrainDefaults:
     underrep_p: float = 0.0
     validate: bool = False  # whether to evaluate the model using the validation set
     mask_amp_tokens: bool = False  # ignore <AMP*> tokens when computing loss
+    log_amp_grad_norm: bool = False
 
 
 def read_start_indices(
@@ -185,7 +186,7 @@ if __name__ == "__main__":
             meta = pickle.load(f)
         meta_vocab_size = meta["vocab_size"]
         print(f"Found vocab_size = {meta_vocab_size} (inside {meta_path})")
-        if C.mask_amp_tokens:
+        if C.mask_amp_tokens or C.log_amp_grad_norm:
             amp_token_ids = [idx for tok, idx in meta["stoi"].items() if tok.startswith("<AMP")]
 
     model_args = dict(n_layer=C.n_layer, n_head=C.n_head, n_embd=C.n_embd, block_size=C.block_size,
@@ -321,7 +322,7 @@ if __name__ == "__main__":
             scaler.scale(loss).backward()
                 # unscale gradients for logging and optional clipping
         scaler.unscale_(optimizer)
-        if amp_token_ids and master_process:
+        if C.log_amp_grad_norm and amp_token_ids and master_process:
             emb_grad = model.module.transformer.wte.weight.grad
             if emb_grad is not None:
                 amp_grad_norm = emb_grad[amp_token_ids].norm().item()
@@ -349,7 +350,7 @@ if __name__ == "__main__":
                 running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
             print(f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, mfu {running_mfu * 100:.2f}%")
             log_msg = f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, mfu {running_mfu * 100:.2f}%"
-            if amp_token_ids:
+            if C.log_amp_grad_norm and amp_token_ids:
                 log_msg += f", amp_grad_norm {amp_grad_norm:.6f}"
             print(log_msg)
         iter_num += 1

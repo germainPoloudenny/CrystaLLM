@@ -10,6 +10,7 @@ always_save_checkpoint: True
 validate: True
 
 mask_amp_tokens: True
+log_amp_grad_norm: True
 
 dataset: 'data/tokens_mp20_amp'
 batch_size: 16
