@@ -167,8 +167,7 @@ saved_models/
 .gitignore
 
 .
-config/
 
-
-jz/
 data/
+config/
+jz/
