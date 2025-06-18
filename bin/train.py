@@ -300,7 +300,7 @@ if __name__ == "__main__":
                         }
                         print(f"saving checkpoint to {C.out_dir}...")
                         torch.save(checkpoint, os.path.join(C.out_dir, "ckpt.pt"))
-            loss_tensor = torch.tensor(best_val_loss).to(C.device)
+            loss_tensor = best_val_loss.clone().detach().to(C.device)
             torch.distributed.broadcast(loss_tensor, src=0)
             best_val_loss = loss_tensor.item()
         if iter_num == 0 and C.eval_only:
@@ -343,4 +343,4 @@ if __name__ == "__main__":
         if iter_num > C.max_iters:
             break
 
-torch.distributed.destroy_process_group()
+    torch.distributed.destroy_process_group()
