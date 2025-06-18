@@ -20,7 +20,6 @@ from crystallm import (
     GPTConfig,
 )
 
-
 @dataclass
 class TrainDefaults:
     out_dir: str = "out"  # the path to the folder where the model checkpoints will be stored
@@ -67,9 +66,7 @@ class TrainDefaults:
     underrep_p: float = 0.0
     validate: bool = False  # whether to evaluate the model using the validation set
     mask_amp_tokens: bool = False  # ignore <AMP*> tokens when computing loss
-    log_amp_grad_norm: bool = False
-
-
+    log_amp_grad_norm: bool = False  # log gradient norm for <AMP*> tokens
 def read_start_indices(
     max_start_index: int,
     data_dir: str,
@@ -175,7 +172,6 @@ if __name__ == "__main__":
         else:
             x, y = x.to(C.device), y.to(C.device)
         return x, y
-
     iter_num = 0
     best_val_loss = 1e9
 
@@ -320,7 +316,8 @@ if __name__ == "__main__":
             X, Y = get_batch("train")
             # backward pass, with gradient scaling if training in fp16
             scaler.scale(loss).backward()
-                # unscale gradients for logging and optional clipping
+
+        # unscale gradients once before optional clipping and logging
         scaler.unscale_(optimizer)
         if C.log_amp_grad_norm and amp_token_ids and master_process:
             emb_grad = model.module.transformer.wte.weight.grad
@@ -330,7 +327,6 @@ if __name__ == "__main__":
                 amp_grad_norm = float('nan')
         # clip the gradient
         if C.grad_clip != 0.0:
-            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), C.grad_clip)
         # step the optimizer and scaler if training in fp16
         scaler.step(optimizer)
