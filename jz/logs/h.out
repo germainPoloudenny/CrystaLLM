@@ -1,0 +1,58 @@
+[Rank 2] Using GPU 2 / Device: NVIDIA H100 80GB HBM3 (PID: 636826)
+[Rank 0] Using GPU 0 / Device: NVIDIA H100 80GB HBM3 (PID: 636824)
+[Rank 3] Using GPU 3 / Device: NVIDIA H100 80GB HBM3 (PID: 636827)
+[Rank 1] Using GPU 1 / Device: NVIDIA H100 80GB HBM3 (PID: 636825)
+783550
+
+[INFO] Nouvelle meilleure val_loss: 2.769004 -> modèle sauvegardé.
+
+[INFO] Nouvelle meilleure val_loss: 2.439897 -> modèle sauvegardé.
+
+[INFO] Nouvelle meilleure val_loss: 2.265558 -> modèle sauvegardé.
+
+[INFO] Nouvelle meilleure val_loss: 2.129463 -> modèle sauvegardé.
+
+[INFO] Nouvelle meilleure val_loss: 1.950092 -> modèle sauvegardé.
+
+[INFO] Nouvelle meilleure val_loss: 1.905431 -> modèle sauvegardé.
+
+[INFO] Nouvelle meilleure val_loss: 1.842978 -> modèle sauvegardé.
+
+[INFO] Nouvelle meilleure val_loss: 1.789796 -> modèle sauvegardé.
+
+[INFO] Nouvelle meilleure val_loss: 1.728076 -> modèle sauvegardé.
+
+[INFO] Nouvelle meilleure val_loss: 1.692868 -> modèle sauvegardé.
+
+[INFO] Nouvelle meilleure val_loss: 1.660693 -> modèle sauvegardé.
+
+[INFO] Nouvelle meilleure val_loss: 1.644407 -> modèle sauvegardé.
+
+[INFO] Nouvelle meilleure val_loss: 1.596435 -> modèle sauvegardé.
+
+[INFO] Nouvelle meilleure val_loss: 1.563537 -> modèle sauvegardé.
+
+[INFO] Nouvelle meilleure val_loss: 1.560656 -> modèle sauvegardé.
+
+[INFO] Nouvelle meilleure val_loss: 1.525304 -> modèle sauvegardé.
+
+[INFO] Nouvelle meilleure val_loss: 1.510781 -> modèle sauvegardé.
+[INFO] Aucune amélioration. Patience: 1/3
+
+[INFO] Nouvelle meilleure val_loss: 1.481446 -> modèle sauvegardé.
+[INFO] Aucune amélioration. Patience: 1/3
+
+[INFO] Nouvelle meilleure val_loss: 1.456455 -> modèle sauvegardé.
+[INFO] Aucune amélioration. Patience: 1/3
+
+[INFO] Nouvelle meilleure val_loss: 1.456184 -> modèle sauvegardé.
+[INFO] Aucune amélioration. Patience: 1/3
+
+[INFO] Nouvelle meilleure val_loss: 1.448699 -> modèle sauvegardé.
+
+[INFO] Nouvelle meilleure val_loss: 1.411430 -> modèle sauvegardé.
+[INFO] Aucune amélioration. Patience: 1/3
+[INFO] Aucune amélioration. Patience: 2/3
+[INFO] Aucune amélioration. Patience: 3/3
+
+[EARLY STOPPING] Arrêt de l'entraînement après 36 époques. Aucune amélioration suffisante de la validation loss.
