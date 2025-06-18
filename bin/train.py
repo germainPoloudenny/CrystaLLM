@@ -273,6 +273,7 @@ if __name__ == "__main__":
     t0 = time.time()
     local_iter_num = 0  # number of iterations in the lifetime of this process
     running_mfu = -1.0
+    amp_grad_norm = float('nan')
     while True:
 
         # determine and set the learning rate for this iteration
@@ -318,6 +319,14 @@ if __name__ == "__main__":
             X, Y = get_batch("train")
             # backward pass, with gradient scaling if training in fp16
             scaler.scale(loss).backward()
+                # unscale gradients for logging and optional clipping
+        scaler.unscale_(optimizer)
+        if amp_token_ids and master_process:
+            emb_grad = model.module.transformer.wte.weight.grad
+            if emb_grad is not None:
+                amp_grad_norm = emb_grad[amp_token_ids].norm().item()
+            else:
+                amp_grad_norm = float('nan')
         # clip the gradient
         if C.grad_clip != 0.0:
             scaler.unscale_(optimizer)
@@ -339,6 +348,10 @@ if __name__ == "__main__":
                 mfu = mfu_src.estimate_mfu(C.batch_size * C.gradient_accumulation_steps * ddp_world_size, dt)
                 running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
             print(f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, mfu {running_mfu * 100:.2f}%")
+            log_msg = f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, mfu {running_mfu * 100:.2f}%"
+            if amp_token_ids:
+                log_msg += f", amp_grad_norm {amp_grad_norm:.6f}"
+            print(log_msg)
         iter_num += 1
         local_iter_num += 1
 
