@@ -20,6 +20,7 @@ from crystallm import (
     GPTConfig,
 )
 
+
 @dataclass
 class TrainDefaults:
     out_dir: str = "out"  # the path to the folder where the model checkpoints will be stored
@@ -66,7 +67,8 @@ class TrainDefaults:
     underrep_p: float = 0.0
     validate: bool = False  # whether to evaluate the model using the validation set
     mask_amp_tokens: bool = False  # ignore <AMP*> tokens when computing loss
-    log_amp_grad_norm: bool = False  # log gradient norm for <AMP*> tokens
+
+
 def read_start_indices(
     max_start_index: int,
     data_dir: str,
@@ -172,6 +174,7 @@ if __name__ == "__main__":
         else:
             x, y = x.to(C.device), y.to(C.device)
         return x, y
+
     iter_num = 0
     best_val_loss = 1e9
 
@@ -182,7 +185,7 @@ if __name__ == "__main__":
             meta = pickle.load(f)
         meta_vocab_size = meta["vocab_size"]
         print(f"Found vocab_size = {meta_vocab_size} (inside {meta_path})")
-        if C.mask_amp_tokens or C.log_amp_grad_norm:
+        if C.mask_amp_tokens:
             amp_token_ids = [idx for tok, idx in meta["stoi"].items() if tok.startswith("<AMP")]
 
     model_args = dict(n_layer=C.n_layer, n_head=C.n_head, n_embd=C.n_embd, block_size=C.block_size,
@@ -270,7 +273,6 @@ if __name__ == "__main__":
     t0 = time.time()
     local_iter_num = 0  # number of iterations in the lifetime of this process
     running_mfu = -1.0
-    amp_grad_norm = float('nan')
     while True:
 
         # determine and set the learning rate for this iteration
@@ -316,17 +318,9 @@ if __name__ == "__main__":
             X, Y = get_batch("train")
             # backward pass, with gradient scaling if training in fp16
             scaler.scale(loss).backward()
-
-        # unscale gradients once before optional clipping and logging
-        scaler.unscale_(optimizer)
-        if C.log_amp_grad_norm and amp_token_ids and master_process:
-            emb_grad = model.module.transformer.wte.weight.grad
-            if emb_grad is not None:
-                amp_grad_norm = emb_grad[amp_token_ids].norm().item()
-            else:
-                amp_grad_norm = float('nan')
         # clip the gradient
         if C.grad_clip != 0.0:
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), C.grad_clip)
         # step the optimizer and scaler if training in fp16
         scaler.step(optimizer)
@@ -345,10 +339,6 @@ if __name__ == "__main__":
                 mfu = mfu_src.estimate_mfu(C.batch_size * C.gradient_accumulation_steps * ddp_world_size, dt)
                 running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
             print(f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, mfu {running_mfu * 100:.2f}%")
-            log_msg = f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, mfu {running_mfu * 100:.2f}%"
-            if C.log_amp_grad_norm and amp_token_ids:
-                log_msg += f", amp_grad_norm {amp_grad_norm:.6f}"
-            print(log_msg)
         iter_num += 1
         local_iter_num += 1
 
