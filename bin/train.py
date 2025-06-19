@@ -20,6 +20,8 @@ from crystallm import (
     GPTConfig,
 )
 
+from typing import Optional
+
 
 @dataclass
 class TrainDefaults:
@@ -34,6 +36,8 @@ class TrainDefaults:
 
     # data
     dataset: str = ""  # the path to the folder containing the .bin files with encoded tokens
+
+    embeddings: Optional[str] = None # optional path to initial embeddings (.csv or .lmdb)
     gradient_accumulation_steps: int = 40  # used to simulate larger batch sizes
     batch_size: int = 64  # if gradient_accumulation_steps > 1, this is the micro-batch size
     block_size: int = 2048  # context of up to `block_size` previous characters
@@ -200,6 +204,25 @@ if __name__ == "__main__":
         model.crop_block_size(C.block_size)
         model_args["block_size"] = C.block_size  # so that the checkpoint will have the right value
     model.to(C.device)
+
+    if C.embeddings:
+        if C.embeddings.endswith(".csv"):
+            from crystallm import embeddings_from_csv as _load_embed
+        elif C.embeddings.endswith(".lmdb"):
+            from crystallm import embeddings_from_lmdb as _load_embed
+        else:
+            raise Exception("Unsupported embeddings format: must be .csv or .lmdb")
+
+        embed_dict = _load_embed(C.embeddings)
+        with torch.no_grad():
+            for token, vec in embed_dict.items():
+                if token not in meta["stoi"]:
+                    continue
+                idx = meta["stoi"][token]
+                vec_t = torch.tensor(vec, dtype=model.transformer.wte.weight.dtype, device=C.device)
+                if vec_t.numel() != model.transformer.wte.weight.shape[1]:
+                    raise ValueError(f"Embedding size mismatch for token {token}")
+                model.transformer.wte.weight[idx] = vec_t
 
     # initialize a GradScaler; if enabled=False scaler is a no-op
     scaler = torch.cuda.amp.GradScaler(enabled=(C.dtype == "float16"))

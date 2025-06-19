@@ -7,6 +7,8 @@ from pymatgen.io.cif import CifBlock
 from pymatgen.symmetry.groups import SpaceGroup
 from pymatgen.core.operations import SymmOp
 
+import numpy as np
+
 
 def get_unit_cell_volume(a, b, c, alpha_deg, beta_deg, gamma_deg):
     alpha_rad = math.radians(alpha_deg)
@@ -232,4 +234,76 @@ def embeddings_from_csv(embedding_csv):
     embedding_data = {
         elements[i]: embeds_array[i] for i in range(len(embeds_array))
     }
+    return embedding_data
+
+def embeddings_from_lmdb(
+    lmdb_path,
+    key_transform=lambda k: k.decode(),
+    *,
+    dtype=None,
+    shape=None,
+    sub_db=None,
+):
+    """Load embeddings from an LMDB database.
+
+    The LMDB database is expected to map token identifiers to either pickled
+    arrays or raw bytes representing NumPy data. Keys are decoded using
+    ``key_transform``.
+
+    Parameters
+    ----------
+    lmdb_path : str
+        Path to the ``.lmdb`` database.
+    key_transform : callable, optional
+        Function applied to each LMDB key to obtain the token string.
+    dtype : numpy dtype or str, optional
+        If specified, indicates that the LMDB values are raw byte sequences and
+        should be interpreted using this dtype. If not provided, the loader will
+        attempt to unpickle the value.
+    shape : tuple, optional
+        Shape to reshape raw byte sequences to when ``dtype`` is used.
+    sub_db : int, optional
+        Index of a named sub-database to read from. If ``None`` (default), the
+        root database is used. When the root database stores only metadata and
+        includes a ``num_dbs`` entry, the first sub-database (index 0) is read
+        automatically.
+
+    Returns
+    -------
+    dict
+        Mapping from token string to ``numpy.ndarray`` vectors.
+    """
+    import lmdb
+    import pickle
+
+    env = lmdb.open(lmdb_path, readonly=True, lock=False, max_dbs=128)
+    embedding_data = {}
+    with env.begin() as root_txn:
+        if sub_db is None and root_txn.get(b"num_dbs") is not None:
+            sub_db = 0
+
+    dbh = env.open_db(str(sub_db).encode()) if sub_db is not None else None
+
+    with env.begin(db=dbh) as txn:
+        cursor = txn.cursor()
+
+        for key, value in cursor:
+            if dbh is None and key in {b"num_dbs", b"length", b"num_embeddings"}:
+                continue
+            token = key_transform(key)
+            try:
+                vec = pickle.loads(value)
+            except Exception:
+                if dtype is None:
+                    raise ValueError(
+                        "Failed to unpickle LMDB value. Specify 'dtype' to "
+                        "interpret raw bytes."
+                    ) from None
+                vec = np.frombuffer(value, dtype=dtype)
+                if shape is not None:
+                    vec = vec.reshape(shape)
+
+            vec = np.asarray(vec).reshape(-1)
+            embedding_data[token] = vec
+    env.close()
     return embedding_data
