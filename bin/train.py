@@ -37,7 +37,9 @@ class TrainDefaults:
     # data
     dataset: str = ""  # the path to the folder containing the .bin files with encoded tokens
 
-    embeddings: Optional[str] = None # optional path to initial embeddings (.csv or .lmdb)
+    embeddings: Optional[str] = None  # optional path to initial embeddings (.csv or .lmdb)
+    condition_dataset: Optional[str] = None  # optional path to dataset providing prefix tokens
+    condition_length: int = 0  # number of tokens from condition_dataset to prepend
     gradient_accumulation_steps: int = 40  # used to simulate larger batch sizes
     batch_size: int = 64  # if gradient_accumulation_steps > 1, this is the micro-batch size
     block_size: int = 2048  # context of up to `block_size` previous characters
@@ -115,6 +117,20 @@ if __name__ == "__main__":
     train_data = np.memmap(os.path.join(C.dataset, "train.bin"), dtype=np.uint16, mode="r")
     val_data = np.memmap(os.path.join(C.dataset, "val.bin"), dtype=np.uint16, mode="r") if C.validate else None
 
+    cond_train = None
+    cond_val = None
+    if C.condition_dataset:
+        cond_train = np.memmap(
+            os.path.join(C.condition_dataset, "train.bin"), dtype=np.uint16, mode="r"
+        )
+        cond_val = (
+            np.memmap(
+                os.path.join(C.condition_dataset, "val.bin"), dtype=np.uint16, mode="r"
+            )
+            if C.validate
+            else None
+        )
+
     cif_start_indices = read_start_indices(
         max_start_index=len(train_data) - C.block_size,
         data_dir=C.dataset,
@@ -138,8 +154,10 @@ if __name__ == "__main__":
 
     def get_batch(split):
         data = train_data if split == "train" else val_data
+        cond_data = cond_train if split == "train" else cond_val
 
-        ix = torch.randint(len(data) - C.block_size, (C.batch_size,))
+        main_len = C.block_size - C.condition_length
+        ix = torch.randint(len(data) - (main_len + 1), (C.batch_size,))
         if split == "train":
             if C.underrep_p is not None and np.random.random() < C.underrep_p:
                 ix = cif_start_indices_underrep[torch.randperm(len(cif_start_indices_underrep))[:C.batch_size]]
@@ -148,8 +166,24 @@ if __name__ == "__main__":
         elif cif_start_indices_val is not None:
             ix = cif_start_indices_val[torch.randperm(len(cif_start_indices_val))[:C.batch_size]]
 
-        x = torch.stack([torch.from_numpy((data[i:i + C.block_size]).astype(np.int64)) for i in ix])
-        y = torch.stack([torch.from_numpy((data[i + 1:i + 1 + C.block_size]).astype(np.int64)) for i in ix])
+        main = torch.stack([
+            torch.from_numpy((data[i : i + main_len + 1]).astype(np.int64)) for i in ix
+        ])
+
+        if cond_data is not None and C.condition_length > 0:
+            jx = torch.randint(len(cond_data) - C.condition_length, (C.batch_size,))
+            cond = torch.stack([
+                torch.from_numpy((cond_data[j : j + C.condition_length]).astype(np.int64))
+                for j in jx
+            ])
+            tokens = torch.cat((cond, main), dim=1)
+        else:
+            tokens = main
+
+        x = tokens[:, :-1]
+        y = tokens[:, 1:]
+        if cond_data is not None and C.condition_length > 0:
+            y[:, :C.condition_length] = -1
 
         if device_type == "cuda":
             # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)

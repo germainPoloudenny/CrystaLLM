@@ -19,6 +19,7 @@ from ._utils import (
     add_atomic_props_block,
     embeddings_from_csv,
     embeddings_from_lmdb,
+    sequences_from_lmdb,
     extract_data_formula,
     extract_formula_nonreduced,
     extract_formula_units,

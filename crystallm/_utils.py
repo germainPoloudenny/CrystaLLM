@@ -307,3 +307,49 @@ def embeddings_from_lmdb(
             embedding_data[token] = vec
     env.close()
     return embedding_data
+
+def sequences_from_lmdb(
+    lmdb_path,
+    *,
+    dtype=None,
+    length=None,
+    sub_db=None,
+):
+    """Load sequences of integers from an LMDB database.
+
+    Each value in the database should represent a sequence of token IDs. The
+    value can be either a pickled Python sequence or a raw byte sequence. When
+    ``dtype`` is provided, raw bytes are interpreted using this dtype and
+    ``length`` may be specified for fixed-length entries.
+    """
+    import lmdb
+    import pickle
+
+    env = lmdb.open(lmdb_path, readonly=True, lock=False, max_dbs=128)
+    sequences = []
+    with env.begin() as root_txn:
+        if sub_db is None and root_txn.get(b"num_dbs") is not None:
+            sub_db = 0
+
+    dbh = env.open_db(str(sub_db).encode()) if sub_db is not None else None
+
+    with env.begin(db=dbh) as txn:
+        cursor = txn.cursor()
+        for key, value in cursor:
+            if dbh is None and key in {b"num_dbs"}:
+                continue
+            try:
+                seq = pickle.loads(value)
+            except Exception:
+                if dtype is None:
+                    raise ValueError(
+                        "Failed to unpickle LMDB value. Specify 'dtype' to interpret raw bytes."
+                    ) from None
+                arr = np.frombuffer(value, dtype=dtype)
+                if length is not None:
+                    arr = arr[:length]
+                seq = arr
+            seq = np.asarray(seq).reshape(-1)
+            sequences.append(seq)
+    env.close()
+    return sequences
