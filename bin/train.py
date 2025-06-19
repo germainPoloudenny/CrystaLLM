@@ -95,6 +95,13 @@ def read_start_indices(
 
 
 if __name__ == "__main__":
+
+    from crystallm import embeddings_from_lmdb
+
+    embeds = embeddings_from_lmdb("data/version_0_last.lmdb")  # chemin vers ton LMDB
+    dim = len(next(iter(embeds.values())))
+    print("dimension:", dim)
+    exit()
     C = parse_config(TrainDefaults)
 
     print("Using configuration:")
