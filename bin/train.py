@@ -5,6 +5,7 @@ https://github.com/karpathy/nanoGPT/blob/eba36e84649f3c6d840a93092cb779a260544d0
 import os
 from dataclasses import dataclass
 from typing import Union
+from torch.utils.tensorboard import SummaryWriter
 import math
 import time
 
@@ -32,6 +33,7 @@ class TrainDefaults:
     eval_iters_val: int = 200
     eval_only: bool = False  # if True, script exits right after the first eval
     always_save_checkpoint: bool = False  # if True, always save a checkpoint after each eval
+    tensorboard_dir: Optional[str] = None  # directory for TensorBoard logs
     init_from: str = "scratch"  # 'scratch' or 'resume'
 
     # data
@@ -40,6 +42,7 @@ class TrainDefaults:
     embeddings: Optional[str] = None  # optional path to initial embeddings (.csv or .lmdb)
     condition_dataset: Optional[str] = None  # optional path to dataset providing prefix tokens
     condition_length: int = 0  # number of tokens from condition_dataset to prepend
+    dataset_fraction: float = 1.0  # proportion of the dataset to use
     gradient_accumulation_steps: int = 40  # used to simulate larger batch sizes
     batch_size: int = 64  # if gradient_accumulation_steps > 1, this is the micro-batch size
     block_size: int = 2048  # context of up to `block_size` previous characters
@@ -69,6 +72,7 @@ class TrainDefaults:
     device: str = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
     dtype: str = "bfloat16"  # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
     compile: bool = True  # use PyTorch 2.0 to compile the model to be faster
+    backend: str = "nccl"
     underrep_p: float = 0.0
     validate: bool = False  # whether to evaluate the model using the validation set
 
@@ -106,7 +110,23 @@ if __name__ == "__main__":
     print(f"Creating {C.out_dir}...")
     os.makedirs(C.out_dir, exist_ok=True)
 
-    torch.manual_seed(1337)
+    if C.tensorboard_dir is None:
+        C.tensorboard_dir = C.out_dir
+
+    torch.distributed.init_process_group(backend=C.backend)
+    ddp_rank = int(os.environ.get("RANK", 0))
+    ddp_world_size = int(os.environ.get("WORLD_SIZE", 1))
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    device = f"cuda:{local_rank}" if "cuda" in C.device else C.device
+    torch.cuda.set_device(device)
+    C.device = device
+    seed_offset = ddp_rank
+
+    master_process = ddp_rank == 0
+
+    writer = SummaryWriter(C.tensorboard_dir) if master_process and C.tensorboard_dir else None
+
+    torch.manual_seed(1337 + seed_offset)
     torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
     torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
     device_type = "cuda" if "cuda" in C.device else "cpu"  # for later use in torch.autocast
@@ -134,6 +154,34 @@ if __name__ == "__main__":
             else None
         )
 
+
+    if not 0 < C.dataset_fraction <= 1.0:
+        raise ValueError("dataset_fraction must be in the (0, 1] range")
+
+    # Tronquer les données d'entraînement et de validation
+    train_len = int(len(train_data) * C.dataset_fraction)
+    train_data = train_data[:train_len]
+
+    if val_data is not None:
+        val_len = int(len(val_data) * C.dataset_fraction)
+        val_data = val_data[:val_len]
+
+    # Charger condition_dataset si spécifié
+    cond_train = None
+    cond_val = None
+    if C.condition_dataset:
+        cond_train_full = np.memmap(
+            os.path.join(C.condition_dataset, "train.bin"), dtype=np.uint16, mode="r"
+        )
+        cond_train_len = int(len(cond_train_full) * C.dataset_fraction)
+        cond_train = cond_train_full[:cond_train_len]
+
+        if C.validate:
+            cond_val_full = np.memmap(
+                os.path.join(C.condition_dataset, "val.bin"), dtype=np.uint16, mode="r"
+            )
+            cond_val_len = int(len(cond_val_full) * C.dataset_fraction)
+            cond_val = cond_val_full[:cond_val_len]
     cif_start_indices = read_start_indices(
         max_start_index=len(train_data) - C.block_size,
         data_dir=C.dataset,
@@ -218,7 +266,7 @@ if __name__ == "__main__":
     elif C.init_from == "resume":
         print(f"Resuming training from {C.out_dir}...")
         ckpt_path = os.path.join(C.out_dir, "ckpt.pt")
-        checkpoint = torch.load(ckpt_path, map_location=C.device)
+        checkpoint = torch.load(ckpt_path, map_location="cpu")
         checkpoint_model_args = checkpoint["model_args"]
         # force these config attributes to be equal otherwise we can't even resume training;
         #  the rest of the attributes (e.g. dropout) can stay as desired
@@ -273,6 +321,8 @@ if __name__ == "__main__":
         unoptimized_model = model
         model = torch.compile(model)  # requires PyTorch 2.0
 
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
+
     # helps estimate an arbitrarily accurate loss over either split using many batches
     @torch.no_grad()
     def estimate_loss():
@@ -317,14 +367,31 @@ if __name__ == "__main__":
 
         # evaluate the loss on train/val sets and write checkpoints
         if iter_num % C.eval_interval == 0:
-            if C.validate:
+            if master_process and C.validate:
                 losses = estimate_loss()
-                print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-            if (C.validate and losses["val"] < best_val_loss) or C.always_save_checkpoint:
-                best_val_loss = losses["val"] if C.validate else 0.
-                if iter_num > 0:
+                if C.validate:
+                    print(
+                        f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
+                    )
+                else:
+                    print(f"step {iter_num}: train loss {losses['train']:.4f}")
+
+                if writer:
+                    writer.add_scalar("loss/train", losses["train"], iter_num)
+                    if C.validate:
+                        writer.add_scalar("loss/val", losses["val"], iter_num)
+
+                should_save = False
+                if C.validate and losses["val"] < best_val_loss:
+                    best_val_loss = losses["val"]
+                    should_save = True
+                elif not C.validate and C.always_save_checkpoint:
+                    should_save = True
+
+                if should_save and iter_num > 0:
+                    state = model.module.state_dict()
                     checkpoint = {
-                        "model": model.state_dict(),
+                        "model": state,
                         "optimizer": optimizer.state_dict(),
                         "model_args": model_args,
                         "iter_num": iter_num,
@@ -333,6 +400,12 @@ if __name__ == "__main__":
                     }
                     print(f"saving checkpoint to {C.out_dir}...")
                     torch.save(checkpoint, os.path.join(C.out_dir, "ckpt.pt"))
+            if torch.is_tensor(best_val_loss):
+                loss_tensor = best_val_loss.clone().detach().to(C.device)
+            else:
+                loss_tensor = torch.tensor(best_val_loss, device=C.device)
+            torch.distributed.broadcast(loss_tensor, src=0)
+            best_val_loss = loss_tensor.item()
         if iter_num == 0 and C.eval_only:
             break
 
@@ -359,15 +432,23 @@ if __name__ == "__main__":
         t1 = time.time()
         dt = t1 - t0
         t0 = t1
-        if iter_num % C.log_interval == 0:
+        if iter_num % C.log_interval == 0 and master_process:
             lossf = loss.item()  # loss as float. note: this is a CPU-GPU sync point
             if local_iter_num >= 5:  # let the training loop settle a bit
-                mfu = model.estimate_mfu(C.batch_size * C.gradient_accumulation_steps, dt)
+                mfu_src = model.module
+                mfu = mfu_src.estimate_mfu(C.batch_size * C.gradient_accumulation_steps * ddp_world_size, dt)
                 running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
             print(f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, mfu {running_mfu * 100:.2f}%")
+            if writer:
+                writer.add_scalar("loss/train_step", lossf, iter_num)
+                writer.add_scalar("lr", lr, iter_num)
         iter_num += 1
         local_iter_num += 1
 
         # termination conditions
         if iter_num > C.max_iters:
             break
+
+    torch.distributed.destroy_process_group()
+    if writer:
+        writer.close()
