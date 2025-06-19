@@ -327,6 +327,7 @@ is the only option that is required to be specified by the user.
   eval_iters_val: int = 200
   eval_only: bool = False  # if True, script exits right after the first eval
   always_save_checkpoint: bool = False  # if True, always save a checkpoint after each eval
+  tensorboard_dir: str | None = None  # write TensorBoard logs to this directory
   init_from: str = "scratch"  # 'scratch' or 'resume'
   
   # data
@@ -366,6 +367,9 @@ is the only option that is required to be specified by the user.
   ```
 </details>
 
+If `tensorboard_dir` is provided, training and validation losses will be logged
+to TensorBoard in that directory.
+
 All the other options can be changed by specifying their values in a .yaml file, or as command line arguments when 
 invoking the `bin/train.py` script. _NOTE: When an option occurs both in the .yaml file and as a command line argument, 
 the command line argument will have precedence._
@@ -393,9 +397,8 @@ See the `config/train_example.yaml` file for a more detailed example. We've also
 the large and small models in the `config` directory.
 
 It's also good practice to specify a value for the `out_dir` option, which is the path to the directory where the model
-will be saved. During training, a checkpoint containing the current model is saved to this directory periodically 
-(depending on how training is configured). The checkpoint is a file named `ckpt.pt`, and any existing 
-`ckpt.pt` file in the `out_dir` will be overwritten every time the model is saved during training.
+checkpoint will be stored. When validation is enabled, the model is saved only when the validation loss decreases.
+The checkpoint is written as a file named `ckpt.pt` in the `out_dir`.
 
 ## Generating Crystal Structures
 

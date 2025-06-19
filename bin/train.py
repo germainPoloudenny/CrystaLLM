@@ -5,6 +5,7 @@ https://github.com/karpathy/nanoGPT/blob/eba36e84649f3c6d840a93092cb779a260544d0
 import os
 from dataclasses import dataclass
 from typing import Union
+from torch.utils.tensorboard import SummaryWriter
 import math
 import time
 
@@ -30,6 +31,7 @@ class TrainDefaults:
     eval_iters_val: int = 200
     eval_only: bool = False  # if True, script exits right after the first eval
     always_save_checkpoint: bool = False  # if True, always save a checkpoint after each eval
+    tensorboard_dir: str | None = None  # directory for TensorBoard logs
     init_from: str = "scratch"  # 'scratch' or 'resume'
 
     # data
@@ -109,6 +111,8 @@ if __name__ == "__main__":
     seed_offset = ddp_rank
 
     master_process = ddp_rank == 0
+
+    writer = SummaryWriter(C.tensorboard_dir) if master_process and C.tensorboard_dir else None
 
     torch.manual_seed(1337 + seed_offset)
     torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
@@ -283,23 +287,38 @@ if __name__ == "__main__":
         # evaluate the loss on train/val sets and write checkpoints
         if iter_num % C.eval_interval == 0:
             if master_process:
+                losses = estimate_loss()
                 if C.validate:
-                    losses = estimate_loss()
-                    print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-                if (C.validate and losses["val"] < best_val_loss) or C.always_save_checkpoint:
-                    best_val_loss = losses["val"] if C.validate else 0.
-                    if iter_num > 0:
-                        state = model.module.state_dict()
-                        checkpoint = {
-                            "model": state,
-                            "optimizer": optimizer.state_dict(),
-                            "model_args": model_args,
-                            "iter_num": iter_num,
-                            "best_val_loss": best_val_loss,
-                            "config": dict(C),
-                        }
-                        print(f"saving checkpoint to {C.out_dir}...")
-                        torch.save(checkpoint, os.path.join(C.out_dir, "ckpt.pt"))
+                    print(
+                        f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}"
+                    )
+                else:
+                    print(f"step {iter_num}: train loss {losses['train']:.4f}")
+
+                if writer:
+                    writer.add_scalar("loss/train", losses["train"], iter_num)
+                    if C.validate:
+                        writer.add_scalar("loss/val", losses["val"], iter_num)
+
+                should_save = False
+                if C.validate and losses["val"] < best_val_loss:
+                    best_val_loss = losses["val"]
+                    should_save = True
+                elif not C.validate and C.always_save_checkpoint:
+                    should_save = True
+
+                if should_save and iter_num > 0:
+                    state = model.module.state_dict()
+                    checkpoint = {
+                        "model": state,
+                        "optimizer": optimizer.state_dict(),
+                        "model_args": model_args,
+                        "iter_num": iter_num,
+                        "best_val_loss": best_val_loss,
+                        "config": dict(C),
+                    }
+                    print(f"saving checkpoint to {C.out_dir}...")
+                    torch.save(checkpoint, os.path.join(C.out_dir, "ckpt.pt"))
             if torch.is_tensor(best_val_loss):
                 loss_tensor = best_val_loss.clone().detach().to(C.device)
             else:
@@ -339,6 +358,9 @@ if __name__ == "__main__":
                 mfu = mfu_src.estimate_mfu(C.batch_size * C.gradient_accumulation_steps * ddp_world_size, dt)
                 running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
             print(f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, mfu {running_mfu * 100:.2f}%")
+            if writer:
+                writer.add_scalar("loss/train_step", lossf, iter_num)
+                writer.add_scalar("lr", lr, iter_num)
         iter_num += 1
         local_iter_num += 1
 
@@ -347,3 +369,5 @@ if __name__ == "__main__":
             break
 
     torch.distributed.destroy_process_group()
+    if writer:
+        writer.close()
