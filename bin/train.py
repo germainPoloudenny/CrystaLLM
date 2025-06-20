@@ -55,6 +55,7 @@ class TrainDefaults:
     condition_embeddings: Optional[str] = (
         None  # optional path to embeddings for conditioning tokens
     )
+    condition_length: int = 256  # number of tokens from condition_dataset to prepend
     dataset_fraction: float = 1.0  # proportion of the dataset to use
     gradient_accumulation_steps: int = 40  # used to simulate larger batch sizes
     batch_size: int = (
