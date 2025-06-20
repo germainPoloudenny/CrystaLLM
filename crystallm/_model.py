@@ -22,6 +22,7 @@ class GPTConfig:
     n_embd: int = 768
     dropout: float = 0.0
     bias: bool = True
+    cond_dim: int = 0  # dimensionality of optional conditioning vectors
 
 
 class LayerNorm(nn.Module):
@@ -157,6 +158,14 @@ class GPT(nn.Module):
             h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f=LayerNorm(config.n_embd, bias=config.bias),
         ))
+        if config.cond_dim > 0:
+            self.cond_encoder = nn.Sequential(
+                nn.Linear(config.cond_dim, config.n_embd, bias=config.bias),
+                nn.GELU(),
+                nn.Linear(config.n_embd, config.n_embd, bias=config.bias),
+            )
+        else:
+            self.cond_encoder = None
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # https://paperswithcode.com/method/weight-tying
         self.transformer.wte.weight = self.lm_head.weight
@@ -191,7 +200,7 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, idx, targets=None):
+    def forward(self, idx, targets=None, cond=None):
         device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
@@ -200,7 +209,11 @@ class GPT(nn.Module):
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (1, t, n_embd)
-        x = self.transformer.drop(tok_emb + pos_emb)
+        if self.cond_encoder is not None and cond is not None:
+            cond_proj = self.cond_encoder(cond).unsqueeze(1).expand(-1, t, -1)
+            x = self.transformer.drop(tok_emb + pos_emb + cond_proj)
+        else:
+            x = self.transformer.drop(tok_emb + pos_emb)
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)
@@ -241,6 +254,8 @@ class GPT(nn.Module):
         blacklist_weight_modules = (torch.nn.LayerNorm, LayerNorm, torch.nn.Embedding)
         for mn, m in self.named_modules():
             for pn, p in m.named_parameters():
+                if not p.requires_grad:
+                    continue
                 fpn = "%s.%s" % (mn, pn) if mn else pn # full param name
                 # random note: because named_modules and named_parameters are recursive
                 # we will see the same tensors p many many times. but doing it this way
@@ -264,7 +279,7 @@ class GPT(nn.Module):
         decay.remove("lm_head.weight")
 
         # validate that we considered every parameter
-        param_dict = {pn: p for pn, p in self.named_parameters()}
+        param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
         inter_params = decay & no_decay
         union_params = decay | no_decay
         assert len(inter_params) == 0, "parameters %s made it into both decay/no_decay sets!" % (str(inter_params), )
@@ -297,7 +312,7 @@ class GPT(nn.Module):
         return mfu
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, cond=None):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
@@ -310,7 +325,7 @@ class GPT(nn.Module):
             # if the sequence context is growing too long we must crop it at block_size
             idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
             # forward the model to get the logits for the index in the sequence
-            logits, _ = self(idx_cond)
+            logits, _ = self(idx_cond, cond=cond)
             # pluck the logits at the final step and scale by desired temperature
             logits = logits[:, -1, :] / temperature
             # optionally crop the logits to only the top k options
