@@ -53,6 +53,7 @@ class TrainDefaults:
     n_embd: int = 768
     dropout: float = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
     bias: bool = False  # do we use bias inside LayerNorm and Linear layers?
+    cond_dim: int = 0  # dimensionality of optional conditioning vectors
 
     # AdamW optimizer
     learning_rate: float = 6e-4  # max learning rate
@@ -239,8 +240,16 @@ if __name__ == "__main__":
         meta_vocab_size = meta["vocab_size"]
         print(f"Found vocab_size = {meta_vocab_size} (inside {meta_path})")
 
-    model_args = dict(n_layer=C.n_layer, n_head=C.n_head, n_embd=C.n_embd, block_size=C.block_size,
-                      bias=C.bias, vocab_size=None, dropout=C.dropout)
+    model_args = dict(
+        n_layer=C.n_layer,
+        n_head=C.n_head,
+        n_embd=C.n_embd,
+        block_size=C.block_size,
+        bias=C.bias,
+        vocab_size=None,
+        dropout=C.dropout,
+        cond_dim=C.cond_dim,
+    )
     if C.init_from == "scratch":
         print("Initializing a new model from scratch...")
         if meta_vocab_size is None:
@@ -265,7 +274,7 @@ if __name__ == "__main__":
         for k, v in list(state_dict.items()):
             if k.startswith(unwanted_prefix):
                 state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
-        model.load_state_dict(state_dict)
+        model.load_state_dict(state_dict, strict=False)
         iter_num = checkpoint["iter_num"]
         best_val_loss = checkpoint["best_val_loss"]
 
@@ -274,6 +283,11 @@ if __name__ == "__main__":
         model.crop_block_size(C.block_size)
         model_args["block_size"] = C.block_size  # so that the checkpoint will have the right value
     model.to(C.device)
+
+    if C.init_from == "resume" and C.condition_dataset:
+        for name, param in model.named_parameters():
+            if not name.startswith("cond_encoder"):
+                param.requires_grad = False
 
     if C.embeddings:
         if C.embeddings.endswith(".csv"):
@@ -298,7 +312,7 @@ if __name__ == "__main__":
     scaler = torch.cuda.amp.GradScaler(enabled=(C.dtype == "float16"))
 
     optimizer = model.configure_optimizers(C.weight_decay, C.learning_rate, (C.beta1, C.beta2))
-    if C.init_from == "resume":
+    if C.init_from == "resume" and C.cond_dim == checkpoint_model_args.get("cond_dim", 0):
         optimizer.load_state_dict(checkpoint["optimizer"])
 
     if C.compile:
