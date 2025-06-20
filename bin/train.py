@@ -140,21 +140,6 @@ if __name__ == "__main__":
     train_data = np.memmap(os.path.join(C.dataset, "train.bin"), dtype=np.uint16, mode="r")
     val_data = np.memmap(os.path.join(C.dataset, "val.bin"), dtype=np.uint16, mode="r") if C.validate else None
 
-    cond_train = None
-    cond_val = None
-    if C.condition_dataset:
-        cond_train = np.memmap(
-            os.path.join(C.condition_dataset, "train.bin"), dtype=np.uint16, mode="r"
-        )
-        cond_val = (
-            np.memmap(
-                os.path.join(C.condition_dataset, "val.bin"), dtype=np.uint16, mode="r"
-            )
-            if C.validate
-            else None
-        )
-
-
     if not 0 < C.dataset_fraction <= 1.0:
         raise ValueError("dataset_fraction must be in the (0, 1] range")
 
