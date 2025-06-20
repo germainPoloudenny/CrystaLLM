@@ -216,6 +216,14 @@ if __name__ == "__main__":
             cond_val_len = int(len(cond_val_full) * C.dataset_fraction)
             cond_val = cond_val_full[:cond_val_len]
 
+        meta_path = os.path.join(C.condition_dataset, "meta.pkl")
+        if os.path.exists(meta_path):
+            with open(meta_path, "rb") as f:
+                cond_meta = pickle.load(f)
+            if C.condition_length == 0 and "condition_length" in cond_meta:
+                C.condition_length = cond_meta["condition_length"]
+                print(f"Using condition_length = {C.condition_length} from {meta_path}")
+
     if C.condition_embeddings:
         if C.condition_embeddings.endswith(".csv"):
             from crystallm import embeddings_from_csv as _load_cond_embed

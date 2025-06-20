@@ -4,6 +4,7 @@ import numpy as np
 
 from crystallm import sequences_from_lmdb
 
+
 def main(args):
     """Convert LMDB sequences to train.bin/val.bin.
 
@@ -34,15 +35,30 @@ def main(args):
 
     os.makedirs(args.output_dir, exist_ok=True)
 
+    meta = {
+        "condition_length": seq_len,
+        "num_sequences": len(sequences),
+    }
+
     if train_seqs:
         train_arr = np.concatenate([seq.astype(np.uint16).ravel() for seq in train_seqs])
         train_arr.tofile(os.path.join(args.output_dir, "train.bin"))
-        print(f"Wrote {len(train_seqs)} sequences to {os.path.join(args.output_dir, 'train.bin')}")
+        print(
+            f"Wrote {len(train_seqs)} sequences to {os.path.join(args.output_dir, 'train.bin')}"
+        )
 
     if val_seqs:
         val_arr = np.concatenate([seq.astype(np.uint16).ravel() for seq in val_seqs])
         val_arr.tofile(os.path.join(args.output_dir, "val.bin"))
-        print(f"Wrote {len(val_seqs)} sequences to {os.path.join(args.output_dir, 'val.bin')}")
+        print(
+            f"Wrote {len(val_seqs)} sequences to {os.path.join(args.output_dir, 'val.bin')}"
+        )
+
+    # Store some metadata for easier use by bin/train.py
+    import pickle
+
+    with open(os.path.join(args.output_dir, "meta.pkl"), "wb") as f:
+        pickle.dump(meta, f)
 
 
 if __name__ == "__main__":
