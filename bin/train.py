@@ -2,6 +2,7 @@
 Adapted from:
 https://github.com/karpathy/nanoGPT/blob/eba36e84649f3c6d840a93092cb779a260544d08/train.py
 """
+
 import os
 from dataclasses import dataclass
 from typing import Union
@@ -26,25 +27,40 @@ from typing import Optional
 
 @dataclass
 class TrainDefaults:
-    out_dir: str = "out"  # the path to the folder where the model checkpoints will be stored
+    out_dir: str = (
+        "out"  # the path to the folder where the model checkpoints will be stored
+    )
     eval_interval: int = 250  # how often to evaluate against the validation set
     log_interval: int = 1  # how often to print to
     eval_iters_train: int = 200
     eval_iters_val: int = 200
     eval_only: bool = False  # if True, script exits right after the first eval
-    always_save_checkpoint: bool = False  # if True, always save a checkpoint after each eval
+    always_save_checkpoint: bool = (
+        False  # if True, always save a checkpoint after each eval
+    )
     tensorboard_dir: Optional[str] = None  # directory for TensorBoard logs
     init_from: str = "scratch"  # 'scratch' or 'resume'
 
     # data
-    dataset: str = ""  # the path to the folder containing the .bin files with encoded tokens
+    dataset: str = (
+        ""  # the path to the folder containing the .bin files with encoded tokens
+    )
 
-    embeddings: Optional[str] = None  # optional path to initial embeddings (.csv or .lmdb)
-    condition_dataset: Optional[str] = None  # optional path to dataset providing prefix tokens
+    embeddings: Optional[str] = (
+        None  # optional path to initial embeddings (.csv or .lmdb)
+    )
+    condition_dataset: Optional[str] = (
+        None  # optional path to dataset providing prefix tokens
+    )
+    condition_embeddings: Optional[str] = (
+        None  # optional path to embeddings for conditioning tokens
+    )
     condition_length: int = 0  # number of tokens from condition_dataset to prepend
     dataset_fraction: float = 1.0  # proportion of the dataset to use
     gradient_accumulation_steps: int = 40  # used to simulate larger batch sizes
-    batch_size: int = 64  # if gradient_accumulation_steps > 1, this is the micro-batch size
+    batch_size: int = (
+        64  # if gradient_accumulation_steps > 1, this is the micro-batch size
+    )
     block_size: int = 2048  # context of up to `block_size` previous characters
 
     # model
@@ -65,13 +81,21 @@ class TrainDefaults:
 
     # learning rate decay settings
     decay_lr: bool = True  # whether to decay the learning rate
-    warmup_iters: int = 2000  # how many steps to warm up for; not super necessary potentially
+    warmup_iters: int = (
+        2000  # how many steps to warm up for; not super necessary potentially
+    )
     lr_decay_iters: int = 600000  # should be ~= max_iters per Chinchilla
-    min_lr: float = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+    min_lr: float = (
+        6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+    )
 
     # system
-    device: str = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
-    dtype: str = "bfloat16"  # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
+    device: str = (
+        "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
+    )
+    dtype: str = (
+        "bfloat16"  # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
+    )
     compile: bool = True  # use PyTorch 2.0 to compile the model to be faster
     backend: str = "nccl"
     underrep_p: float = 0.0
@@ -95,7 +119,9 @@ def read_start_indices(
             # remove indices that would result in out-of-bounds sequences
             start_indices = start_indices[start_indices <= max_start_index]
         elif required:
-            raise Exception(f"Expected to find a file in dataset dir named '{starts_fname}'")
+            raise Exception(
+                f"Expected to find a file in dataset dir named '{starts_fname}'"
+            )
     return start_indices
 
 
@@ -125,21 +151,41 @@ if __name__ == "__main__":
 
     master_process = ddp_rank == 0
 
-    writer = SummaryWriter(C.tensorboard_dir) if master_process and C.tensorboard_dir else None
+    writer = (
+        SummaryWriter(C.tensorboard_dir)
+        if master_process and C.tensorboard_dir
+        else None
+    )
 
     torch.manual_seed(1337 + seed_offset)
     torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
     torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
-    device_type = "cuda" if "cuda" in C.device else "cpu"  # for later use in torch.autocast
+    device_type = (
+        "cuda" if "cuda" in C.device else "cpu"
+    )  # for later use in torch.autocast
     # note: float16 data type will automatically use a GradScaler
-    ptdtype = {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}[C.dtype]
-    ctx = nullcontext() if device_type == "cpu" else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
+    ptdtype = {
+        "float32": torch.float32,
+        "bfloat16": torch.bfloat16,
+        "float16": torch.float16,
+    }[C.dtype]
+    ctx = (
+        nullcontext()
+        if device_type == "cpu"
+        else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
+    )
 
     if not C.dataset:
         raise Exception("The 'dataset' option is required and cannot be empty")
 
-    train_data = np.memmap(os.path.join(C.dataset, "train.bin"), dtype=np.uint16, mode="r")
-    val_data = np.memmap(os.path.join(C.dataset, "val.bin"), dtype=np.uint16, mode="r") if C.validate else None
+    train_data = np.memmap(
+        os.path.join(C.dataset, "train.bin"), dtype=np.uint16, mode="r"
+    )
+    val_data = (
+        np.memmap(os.path.join(C.dataset, "val.bin"), dtype=np.uint16, mode="r")
+        if C.validate
+        else None
+    )
 
     if not 0 < C.dataset_fraction <= 1.0:
         raise ValueError("dataset_fraction must be in the (0, 1] range")
@@ -155,6 +201,7 @@ if __name__ == "__main__":
     # Charger condition_dataset si spécifié
     cond_train = None
     cond_val = None
+    cond_embed_dict = None
     if C.condition_dataset:
         cond_train_full = np.memmap(
             os.path.join(C.condition_dataset, "train.bin"), dtype=np.uint16, mode="r"
@@ -168,6 +215,17 @@ if __name__ == "__main__":
             )
             cond_val_len = int(len(cond_val_full) * C.dataset_fraction)
             cond_val = cond_val_full[:cond_val_len]
+
+    if C.condition_embeddings:
+        if C.condition_embeddings.endswith(".csv"):
+            from crystallm import embeddings_from_csv as _load_cond_embed
+        elif C.condition_embeddings.endswith(".lmdb"):
+            from crystallm import embeddings_from_lmdb as _load_cond_embed
+        else:
+            raise Exception(
+                "Unsupported condition_embeddings format: must be .csv or .lmdb"
+            )
+        cond_embed_dict = _load_cond_embed(C.condition_embeddings)
     cif_start_indices = read_start_indices(
         max_start_index=len(train_data) - C.block_size,
         data_dir=C.dataset,
@@ -197,37 +255,73 @@ if __name__ == "__main__":
         ix = torch.randint(len(data) - (main_len + 1), (C.batch_size,))
         if split == "train":
             if C.underrep_p is not None and np.random.random() < C.underrep_p:
-                ix = cif_start_indices_underrep[torch.randperm(len(cif_start_indices_underrep))[:C.batch_size]]
+                ix = cif_start_indices_underrep[
+                    torch.randperm(len(cif_start_indices_underrep))[: C.batch_size]
+                ]
             elif cif_start_indices is not None:
-                ix = cif_start_indices[torch.randperm(len(cif_start_indices))[:C.batch_size]]
+                ix = cif_start_indices[
+                    torch.randperm(len(cif_start_indices))[: C.batch_size]
+                ]
         elif cif_start_indices_val is not None:
-            ix = cif_start_indices_val[torch.randperm(len(cif_start_indices_val))[:C.batch_size]]
+            ix = cif_start_indices_val[
+                torch.randperm(len(cif_start_indices_val))[: C.batch_size]
+            ]
 
-        main = torch.stack([
-            torch.from_numpy((data[i : i + main_len + 1]).astype(np.int64)) for i in ix
-        ])
+        main = torch.stack(
+            [
+                torch.from_numpy((data[i : i + main_len + 1]).astype(np.int64))
+                for i in ix
+            ]
+        )
 
+        cond_vec = None
         if cond_data is not None and C.condition_length > 0:
             jx = torch.randint(len(cond_data) - C.condition_length, (C.batch_size,))
-            cond = torch.stack([
-                torch.from_numpy((cond_data[j : j + C.condition_length]).astype(np.int64))
-                for j in jx
-            ])
+            cond = torch.stack(
+                [
+                    torch.from_numpy(
+                        (cond_data[j : j + C.condition_length]).astype(np.int64)
+                    )
+                    for j in jx
+                ]
+            )
             tokens = torch.cat((cond, main), dim=1)
+            if cond_embed_dict is not None:
+                vecs = []
+                for row in cond:
+                    emb_list = []
+                    for tok in row.tolist():
+                        token = meta["itos"][tok]
+                        if token in cond_embed_dict:
+                            emb_list.append(
+                                torch.tensor(cond_embed_dict[token], dtype=ptdtype)
+                            )
+                    if emb_list:
+                        emb = torch.stack(emb_list).mean(dim=0)
+                    else:
+                        emb = torch.zeros(C.cond_dim, dtype=ptdtype)
+                    vecs.append(emb)
+                cond_vec = torch.stack(vecs)
         else:
             tokens = main
 
         x = tokens[:, :-1]
         y = tokens[:, 1:]
         if cond_data is not None and C.condition_length > 0:
-            y[:, :C.condition_length] = -1
+            y[:, : C.condition_length] = -1
 
         if device_type == "cuda":
             # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
-            x, y = x.pin_memory().to(C.device, non_blocking=True), y.pin_memory().to(C.device, non_blocking=True)
+            x, y = x.pin_memory().to(C.device, non_blocking=True), y.pin_memory().to(
+                C.device, non_blocking=True
+            )
+            if cond_vec is not None:
+                cond_vec = cond_vec.pin_memory().to(C.device, non_blocking=True)
         else:
             x, y = x.to(C.device), y.to(C.device)
-        return x, y
+            if cond_vec is not None:
+                cond_vec = cond_vec.to(C.device)
+        return x, y, cond_vec
 
     iter_num = 0
     best_val_loss = 1e9
@@ -254,7 +348,9 @@ if __name__ == "__main__":
         print("Initializing a new model from scratch...")
         if meta_vocab_size is None:
             print("Defaulting to vocab_size of 371...")
-        model_args["vocab_size"] = meta_vocab_size if meta_vocab_size is not None else 371
+        model_args["vocab_size"] = (
+            meta_vocab_size if meta_vocab_size is not None else 371
+        )
         gptconf = GPTConfig(**model_args)
         model = GPT(gptconf)
     elif C.init_from == "resume":
@@ -273,7 +369,7 @@ if __name__ == "__main__":
         unwanted_prefix = "_orig_mod."
         for k, v in list(state_dict.items()):
             if k.startswith(unwanted_prefix):
-                state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
+                state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
         model.load_state_dict(state_dict, strict=False)
         iter_num = checkpoint["iter_num"]
         best_val_loss = checkpoint["best_val_loss"]
@@ -281,7 +377,9 @@ if __name__ == "__main__":
     # crop down the model block size if desired, using model surgery
     if C.block_size < model.config.block_size:
         model.crop_block_size(C.block_size)
-        model_args["block_size"] = C.block_size  # so that the checkpoint will have the right value
+        model_args["block_size"] = (
+            C.block_size
+        )  # so that the checkpoint will have the right value
     model.to(C.device)
 
     if C.init_from == "resume" and C.condition_dataset:
@@ -303,16 +401,29 @@ if __name__ == "__main__":
                 if token not in meta["stoi"]:
                     continue
                 idx = meta["stoi"][token]
-                vec_t = torch.tensor(vec, dtype=model.transformer.wte.weight.dtype, device=C.device)
+                vec_t = torch.tensor(
+                    vec, dtype=model.transformer.wte.weight.dtype, device=C.device
+                )
                 if vec_t.numel() != model.transformer.wte.weight.shape[1]:
-                    raise ValueError(f"Embedding size mismatch for token {token}")
+                    if model.cond_encoder is not None and vec_t.numel() == C.cond_dim:
+                        vec_t = (
+                            model.cond_encoder(vec_t.unsqueeze(0))
+                            .squeeze(0)
+                            .to(model.transformer.wte.weight.dtype)
+                        )
+                    else:
+                        raise ValueError(f"Embedding size mismatch for token {token}")
                 model.transformer.wte.weight[idx] = vec_t
 
     # initialize a GradScaler; if enabled=False scaler is a no-op
     scaler = torch.cuda.amp.GradScaler(enabled=(C.dtype == "float16"))
 
-    optimizer = model.configure_optimizers(C.weight_decay, C.learning_rate, (C.beta1, C.beta2))
-    if C.init_from == "resume" and C.cond_dim == checkpoint_model_args.get("cond_dim", 0):
+    optimizer = model.configure_optimizers(
+        C.weight_decay, C.learning_rate, (C.beta1, C.beta2)
+    )
+    if C.init_from == "resume" and C.cond_dim == checkpoint_model_args.get(
+        "cond_dim", 0
+    ):
         optimizer.load_state_dict(checkpoint["optimizer"])
 
     if C.compile:
@@ -327,12 +438,15 @@ if __name__ == "__main__":
     def estimate_loss():
         out = {}
         model.eval()
-        for split, eval_iters in [("train", C.eval_iters_train), ("val", C.eval_iters_val)]:
+        for split, eval_iters in [
+            ("train", C.eval_iters_train),
+            ("val", C.eval_iters_val),
+        ]:
             losses = torch.zeros(eval_iters)
             for k in range(eval_iters):
-                X, Y = get_batch(split)
+                X, Y, Cvec = get_batch(split)
                 with ctx:
-                    logits, loss = model(X, Y)
+                    logits, loss = model(X, Y, cond=Cvec)
                 losses[k] = loss.item()
             out[split] = losses.mean()
         model.train()
@@ -353,7 +467,7 @@ if __name__ == "__main__":
         return C.min_lr + coeff * (C.learning_rate - C.min_lr)
 
     # training loop
-    X, Y = get_batch("train")
+    X, Y, Cvec = get_batch("train")
     t0 = time.time()
     local_iter_num = 0  # number of iterations in the lifetime of this process
     running_mfu = -1.0
@@ -412,9 +526,9 @@ if __name__ == "__main__":
         # and using the GradScaler if data type is float16
         for micro_step in range(C.gradient_accumulation_steps):
             with ctx:
-                logits, loss = model(X, Y)
+                logits, loss = model(X, Y, cond=Cvec)
             # immediately async prefetch next batch while model is doing the forward pass on the GPU
-            X, Y = get_batch("train")
+            X, Y, Cvec = get_batch("train")
             # backward pass, with gradient scaling if training in fp16
             scaler.scale(loss).backward()
         # clip the gradient
@@ -435,9 +549,15 @@ if __name__ == "__main__":
             lossf = loss.item()  # loss as float. note: this is a CPU-GPU sync point
             if local_iter_num >= 5:  # let the training loop settle a bit
                 mfu_src = model.module
-                mfu = mfu_src.estimate_mfu(C.batch_size * C.gradient_accumulation_steps * ddp_world_size, dt)
-                running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
-            print(f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, mfu {running_mfu * 100:.2f}%")
+                mfu = mfu_src.estimate_mfu(
+                    C.batch_size * C.gradient_accumulation_steps * ddp_world_size, dt
+                )
+                running_mfu = (
+                    mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
+                )
+            print(
+                f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, mfu {running_mfu * 100:.2f}%"
+            )
             if writer:
                 writer.add_scalar("loss/train_step", lossf, iter_num)
                 writer.add_scalar("lr", lr, iter_num)
