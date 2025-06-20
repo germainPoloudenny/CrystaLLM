@@ -55,7 +55,6 @@ class TrainDefaults:
     condition_embeddings: Optional[str] = (
         None  # optional path to embeddings for conditioning tokens
     )
-    condition_length: int = 0  # number of tokens from condition_dataset to prepend
     dataset_fraction: float = 1.0  # proportion of the dataset to use
     gradient_accumulation_steps: int = 40  # used to simulate larger batch sizes
     batch_size: int = (
@@ -226,6 +225,7 @@ if __name__ == "__main__":
                 "Unsupported condition_embeddings format: must be .csv or .lmdb"
             )
         cond_embed_dict = _load_cond_embed(C.condition_embeddings)
+
     cif_start_indices = read_start_indices(
         max_start_index=len(train_data) - C.block_size,
         data_dir=C.dataset,
@@ -246,6 +246,18 @@ if __name__ == "__main__":
         on_condition=C.underrep_p > 0,
         required=True,
     )
+
+    if cond_train is not None and C.condition_length == 0:
+        if cif_start_indices is not None and len(cif_start_indices) > 0:
+            if len(cond_train) % len(cif_start_indices) == 0:
+                C.condition_length = len(cond_train) // len(cif_start_indices)
+                print(f"Auto-detected condition_length = {C.condition_length}")
+            else:
+                raise ValueError(
+                    "Unable to infer condition_length automatically; please set it"
+                )
+        else:
+            raise ValueError("Start indices not available; please set condition_length")
 
     def get_batch(split):
         data = train_data if split == "train" else val_data
@@ -382,7 +394,11 @@ if __name__ == "__main__":
         )  # so that the checkpoint will have the right value
     model.to(C.device)
 
-    if C.init_from == "resume" and C.condition_dataset:
+    if (
+        C.init_from == "resume"
+        and C.condition_dataset
+        and (C.condition_length > 0 or C.condition_embeddings)
+    ):
         for name, param in model.named_parameters():
             if not name.startswith("cond_encoder"):
                 param.requires_grad = False
