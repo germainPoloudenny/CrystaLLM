@@ -2,10 +2,21 @@ import os
 import gzip
 import pickle
 import argparse
-import numpy as np
-from tqdm import tqdm
+try:
+    import numpy as np
+except ModuleNotFoundError:  # pragma: no cover - optional dependency for tests
+    np = None
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:  # pragma: no cover - optional dependency for tests
+    def tqdm(iterable=None, **kwargs):
+        return iterable if iterable is not None else lambda x: x
 
-from crystallm import CIFTokenizer, sequences_from_lmdb
+try:
+    from crystallm import CIFTokenizer, sequences_from_lmdb
+except Exception:  # pragma: no cover - optional deps for unit tests
+    CIFTokenizer = None
+    sequences_from_lmdb = None
 
 
 def load_pickle(path):
@@ -15,22 +26,71 @@ def load_pickle(path):
 
 
 def encode_sequences(cif_list, tokenizer, stoi, itos, keep_unknown=False):
-    encoded = []
-    for item in tqdm(cif_list, desc='encoding sequences'):
-        cif = item[1] if isinstance(item, (list, tuple)) and len(item) == 2 else item
-        if isinstance(cif, bytes):
-            cif = cif.decode('utf-8', errors='ignore')
-        tokens = tokenizer.tokenize_cif(str(cif), keep_unknown=keep_unknown)
+    """Tokenize a list of CIF strings or integer sequences.
 
-        ids = []
+    Parameters
+    ----------
+    cif_list : list
+        Iterable containing either CIF strings/tuples or sequences of integers.
+    tokenizer : CIFTokenizer
+        Tokenizer used for CIF strings.
+    stoi : dict
+        Existing string-to-index mapping (will be updated in-place).
+    itos : dict
+        Existing index-to-string mapping (will be updated in-place).
+    keep_unknown : bool, optional
+        Whether to keep unknown tokens instead of replacing them with ``<unk>``.
+    """
+
+    encoded = []
+
+    for item in tqdm(cif_list, desc="encoding sequences"):
+        if (
+            isinstance(item, (list, tuple))
+            and len(item) == 2
+            and isinstance(item[1], (str, bytes))
+        ):
+            cif = item[1]
+        else:
+            cif = item
+
+        # Bytes may represent a CIF string
+        if isinstance(cif, bytes):
+            cif = cif.decode("utf-8", errors="ignore")
+
+        tokens = None
+
+        # Sequence of integers: map each unique integer to <amp_i>
+        if not isinstance(cif, str):
+            if np is not None:
+                arr = np.asarray(cif).reshape(-1)
+                is_int_seq = np.issubdtype(arr.dtype, np.integer)
+                values = arr.tolist()
+            else:
+                try:
+                    values = list(cif)
+                    is_int_seq = all(isinstance(v, int) for v in values)
+                except TypeError:
+                    is_int_seq = False
+                    values = []
+
+            if is_int_seq:
+                tokens = [f"<amp_{int(v)}>" for v in values]
+
+        # Fallback: treat as CIF string
+        if tokens is None:
+            tokens = tokenizer.tokenize_cif(str(cif), keep_unknown=keep_unknown)
+
         for tok in tokens:
             if tok not in stoi:
                 idx = len(stoi)
                 stoi[tok] = idx
-                itos[idx] = tok  # ✨ Add new token to vocab
-            ids.append(stoi[tok])
-        encoded.extend(ids)
-    return np.array(encoded, dtype=np.uint16)
+                itos[idx] = tok
+            encoded.append(stoi[tok])
+
+    if np is not None:
+        return np.array(encoded, dtype=np.uint16)
+    return encoded
 
 
 if __name__ == '__main__':
