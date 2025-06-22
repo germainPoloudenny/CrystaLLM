@@ -121,7 +121,7 @@ class CIFTokenizer:
         # decoder: take a list of integers (i.e. encoded tokens), output a string
         return ''.join([self._id_to_token[i] for i in ids])
 
-    def tokenize_cif(self, cif_string, single_spaces=True):
+    def tokenize_cif(self, cif_string, single_spaces=True, keep_unknown=False):
         # Preprocessing step to replace '_symmetry_space_group_name_H-M Pm'
         #  with '_symmetry_space_group_name_H-M Pm_sg',to disambiguate from atom 'Pm',
         #  or any space group symbol to avoid problematic cases, like 'P1'
@@ -139,7 +139,10 @@ class CIFTokenizer:
             cif_string = re.sub(r'[ \t]+', ' ', cif_string)
         tokens = re.findall(full_pattern, cif_string)
 
-        # Replace unrecognized tokens with the unknown_token
-        tokens = [token if token in self._tokens else UNK_TOKEN for token in tokens]
+        if keep_unknown:
+            tokens = [token if token in self._tokens else token for token in tokens]
+        else:
+            # Replace unrecognized tokens with the unknown_token
+            tokens = [token if token in self._tokens else UNK_TOKEN for token in tokens]
 
         return tokens
