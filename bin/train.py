@@ -202,6 +202,7 @@ if __name__ == "__main__":
     cond_train = None
     cond_val = None
     cond_embed_dict = None
+    cond_meta = None
     if C.condition_dataset:
         cond_train_full = np.memmap(
             os.path.join(C.condition_dataset, "train.bin"), dtype=np.uint16, mode="r"
@@ -222,7 +223,9 @@ if __name__ == "__main__":
                 cond_meta = pickle.load(f)
             if C.condition_length == 0 and "condition_length" in cond_meta:
                 C.condition_length = cond_meta["condition_length"]
-                print(f"Using condition_length = {C.condition_length} from {meta_path}")
+                print(
+                    f"Using condition_length = {C.condition_length} from {meta_path}"
+                )
 
     if C.condition_embeddings:
         if C.condition_embeddings.endswith(".csv"):
@@ -349,11 +352,23 @@ if __name__ == "__main__":
 
     meta_path = os.path.join(C.dataset, "meta.pkl")
     meta_vocab_size = None
+    meta = None
     if os.path.exists(meta_path):
         with open(meta_path, "rb") as f:
             meta = pickle.load(f)
-        meta_vocab_size = meta["vocab_size"]
+        meta_vocab_size = meta.get("vocab_size", len(meta["itos"]))
         print(f"Found vocab_size = {meta_vocab_size} (inside {meta_path})")
+
+    cond_meta_path = (
+        os.path.join(C.condition_dataset, "meta.pkl") if C.condition_dataset else None
+    )
+    if cond_meta is not None:
+        meta = cond_meta
+        meta_vocab_size = meta.get("vocab_size", len(meta["itos"]))
+        if cond_meta_path:
+            print(
+                f"Using combined vocab_size = {meta_vocab_size} from {cond_meta_path}"
+            )
 
     model_args = dict(
         n_layer=C.n_layer,
