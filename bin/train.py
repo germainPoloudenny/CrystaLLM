@@ -370,6 +370,19 @@ if __name__ == "__main__":
                 f"Using combined vocab_size = {meta_vocab_size} from {cond_meta_path}"
             )
 
+    # Determine the maximum token id present in the loaded datasets
+    max_token_id = int(np.max(train_data))
+    if val_data is not None:
+        max_token_id = max(max_token_id, int(np.max(val_data)))
+    if cond_train is not None:
+        max_token_id = max(max_token_id, int(np.max(cond_train)))
+    if cond_val is not None:
+        max_token_id = max(max_token_id, int(np.max(cond_val)))
+    detected_vocab_size = max_token_id + 1
+    if meta_vocab_size is None or detected_vocab_size > meta_vocab_size:
+        meta_vocab_size = detected_vocab_size
+        print(f"Detected vocab_size = {meta_vocab_size} from data")
+
     model_args = dict(
         n_layer=C.n_layer,
         n_head=C.n_head,
