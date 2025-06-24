@@ -371,17 +371,39 @@ if __name__ == "__main__":
             )
 
     # Determine the maximum token id present in the loaded datasets
-    max_token_id = int(np.max(train_data))
-    if val_data is not None:
-        max_token_id = max(max_token_id, int(np.max(val_data)))
-    if cond_train is not None:
-        max_token_id = max(max_token_id, int(np.max(cond_train)))
-    if cond_val is not None:
-        max_token_id = max(max_token_id, int(np.max(cond_val)))
-    detected_vocab_size = max_token_id + 1
-    if meta_vocab_size is None or detected_vocab_size > meta_vocab_size:
+    data_sources = [
+        (train_data, os.path.join(C.dataset, "train.bin")),
+        (val_data, os.path.join(C.dataset, "val.bin")),
+        (
+            cond_train,
+            os.path.join(C.condition_dataset, "train.bin") if C.condition_dataset else None,
+        ),
+        (
+            cond_val,
+            os.path.join(C.condition_dataset, "val.bin") if C.condition_dataset else None,
+        ),
+    ]
+
+    dataset_maxes = []
+    for arr, path in data_sources:
+        if arr is not None:
+            dataset_maxes.append((int(np.max(arr)), path))
+        else:
+            dataset_maxes.append((-1, path))
+
+    detected_vocab_size = max(m for m, _ in dataset_maxes) + 1
+
+    if meta_vocab_size is None:
         meta_vocab_size = detected_vocab_size
         print(f"Detected vocab_size = {meta_vocab_size} from data")
+    else:
+        for max_id, path in dataset_maxes:
+            if path is None:
+                continue
+            if max_id >= meta_vocab_size:
+                raise ValueError(
+                    f"Token id {max_id} in {path} exceeds vocab_size {meta_vocab_size}"
+                )
 
     model_args = dict(
         n_layer=C.n_layer,
