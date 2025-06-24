@@ -22,8 +22,6 @@ class GPTConfig:
     n_embd: int = 768
     dropout: float = 0.0
     bias: bool = True
-    cond_dim: int = 0  # dimensionality of optional conditioning vectors
-    cond_dims: tuple = ()  # optional list of conditioning dims for multiple encoders
 
 
 class LayerNorm(nn.Module):
@@ -159,28 +157,6 @@ class GPT(nn.Module):
             h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f=LayerNorm(config.n_embd, bias=config.bias),
         ))
-        if getattr(config, "cond_dims", None):
-            self.cond_encoders = nn.ModuleList(
-                [
-                    nn.Sequential(
-                        nn.Linear(d, config.n_embd, bias=config.bias),
-                        nn.GELU(),
-                        nn.Linear(config.n_embd, config.n_embd, bias=config.bias),
-                    )
-                    for d in config.cond_dims
-                ]
-            )
-            self.cond_encoder = None
-        elif config.cond_dim > 0:
-            self.cond_encoder = nn.Sequential(
-                nn.Linear(config.cond_dim, config.n_embd, bias=config.bias),
-                nn.GELU(),
-                nn.Linear(config.n_embd, config.n_embd, bias=config.bias),
-            )
-            self.cond_encoders = None
-        else:
-            self.cond_encoder = None
-            self.cond_encoders = None
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # https://paperswithcode.com/method/weight-tying
         self.transformer.wte.weight = self.lm_head.weight
@@ -215,33 +191,16 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, idx, targets=None, cond=None):
+    def forward(self, idx, targets=None):
         device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
-        if torch.any(idx >= self.config.vocab_size):
-            offending = int(torch.max(idx).item())
-            raise ValueError(
-                f"Token id {offending} exceeds embedding vocabulary size {self.config.vocab_size}"
-            )
         pos = torch.arange(0, t, dtype=torch.long, device=device).unsqueeze(0)  # shape (1, t)
 
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (1, t, n_embd)
-        cond_proj = None
-        if self.cond_encoders is not None and cond is not None:
-            assert isinstance(cond, (list, tuple)) and len(cond) == len(self.cond_encoders)
-            cond_sum = 0
-            for vec, enc in zip(cond, self.cond_encoders):
-                cond_sum = cond_sum + enc(vec)
-            cond_proj = cond_sum.unsqueeze(1).expand(-1, t, -1)
-        elif self.cond_encoder is not None and cond is not None:
-            cond_proj = self.cond_encoder(cond).unsqueeze(1).expand(-1, t, -1)
-        if cond_proj is not None:
-            x = self.transformer.drop(tok_emb + pos_emb + cond_proj)
-        else:
-            x = self.transformer.drop(tok_emb + pos_emb)
+        x = self.transformer.drop(tok_emb + pos_emb)
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)
@@ -282,8 +241,6 @@ class GPT(nn.Module):
         blacklist_weight_modules = (torch.nn.LayerNorm, LayerNorm, torch.nn.Embedding)
         for mn, m in self.named_modules():
             for pn, p in m.named_parameters():
-                if not p.requires_grad:
-                    continue
                 fpn = "%s.%s" % (mn, pn) if mn else pn # full param name
                 # random note: because named_modules and named_parameters are recursive
                 # we will see the same tensors p many many times. but doing it this way
@@ -304,11 +261,10 @@ class GPT(nn.Module):
         # will only return the first occurrence, keyed by "transformer.wte.weight", below.
         # so let's manually remove "lm_head.weight" from decay set. This will include
         # this tensor into optimization via transformer.wte.weight only, and not decayed.
-        if "lm_head.weight" in decay:
-            decay.remove("lm_head.weight")
+        decay.remove("lm_head.weight")
 
         # validate that we considered every parameter
-        param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
+        param_dict = {pn: p for pn, p in self.named_parameters()}
         inter_params = decay & no_decay
         union_params = decay | no_decay
         assert len(inter_params) == 0, "parameters %s made it into both decay/no_decay sets!" % (str(inter_params), )
@@ -341,7 +297,7 @@ class GPT(nn.Module):
         return mfu
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, cond=None):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
@@ -354,7 +310,7 @@ class GPT(nn.Module):
             # if the sequence context is growing too long we must crop it at block_size
             idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
             # forward the model to get the logits for the index in the sequence
-            logits, _ = self(idx_cond, cond=cond)
+            logits, _ = self(idx_cond)
             # pluck the logits at the final step and scale by desired temperature
             logits = logits[:, -1, :] / temperature
             # optionally crop the logits to only the top k options
