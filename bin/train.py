@@ -225,16 +225,29 @@ if __name__ == "__main__":
                     f"Using condition_length = {C.condition_length} from {meta_path}"
                 )
 
+    cond_embed_dict = None
+    cond_embed_dicts = None
+    cond_dims = []
     if C.condition_embeddings:
-        if C.condition_embeddings.endswith(".csv"):
-            from crystallm import embeddings_from_csv as _load_cond_embed
-        elif C.condition_embeddings.endswith(".lmdb"):
-            from crystallm import embeddings_from_lmdb as _load_cond_embed
-        else:
-            raise Exception(
-                "Unsupported condition_embeddings format: must be .csv or .lmdb"
-            )
-        cond_embed_dict = _load_cond_embed(C.condition_embeddings)
+        embed_paths = [p.strip() for p in C.condition_embeddings.split(",")]
+        cond_embed_dicts = []
+        for path in embed_paths:
+            if path.endswith(".csv"):
+                from crystallm import embeddings_from_csv as _load_cond_embed
+            elif path.endswith(".lmdb"):
+                from crystallm import embeddings_from_lmdb as _load_cond_embed
+            else:
+                raise Exception(
+                    "Unsupported condition_embeddings format: must be .csv or .lmdb"
+                )
+            d = _load_cond_embed(path)
+            cond_embed_dicts.append(d)
+            if d:
+                cond_dims.append(len(next(iter(d.values()))))
+            else:
+                cond_dims.append(0)
+        if len(cond_embed_dicts) == 1:
+            cond_embed_dict = cond_embed_dicts[0]
 
     cif_start_indices = read_start_indices(
         max_start_index=len(train_data) - C.block_size,
@@ -308,21 +321,29 @@ if __name__ == "__main__":
                 ]
             )
             tokens = torch.cat((cond, main), dim=1)
-            if cond_embed_dict is not None:
+            if cond_embed_dicts is not None:
+                vecs_blocks = [[] for _ in cond_embed_dicts]
+                for row in cond:
+                    for b_idx, emb_dict in enumerate(cond_embed_dicts):
+                        emb_list = []
+                        for tok in row.tolist():
+                            token = meta_cond["itos"][tok] if meta_cond is not None else meta_main["itos"][tok]
+                            if token in emb_dict:
+                                emb_list.append(torch.tensor(emb_dict[token], dtype=ptdtype))
+                        if emb_list:
+                            emb = torch.stack(emb_list).mean(dim=0)
+                        else:
+                            emb = torch.zeros(cond_dims[b_idx], dtype=ptdtype)
+                        vecs_blocks[b_idx].append(emb)
+                cond_vec = [torch.stack(v) for v in vecs_blocks]
+            elif cond_embed_dict is not None:
                 vecs = []
                 for row in cond:
                     emb_list = []
                     for tok in row.tolist():
-                        if meta_cond is not None:
-                            token = meta_cond["itos"][tok]
-                        else:
-                            token = meta_main["itos"][tok]
+                        token = meta_cond["itos"][tok] if meta_cond is not None else meta_main["itos"][tok]
                         if token in cond_embed_dict:
-                            emb_list.append(
-                                torch.tensor(cond_embed_dict[token], dtype=ptdtype)
-                            )
-                        else:
-                            print(f"Warning: Missing embedding for token {token}")
+                            emb_list.append(torch.tensor(cond_embed_dict[token], dtype=ptdtype))
                     if emb_list:
                         emb = torch.stack(emb_list).mean(dim=0)
                     else:
@@ -343,11 +364,17 @@ if __name__ == "__main__":
                 C.device, non_blocking=True
             )
             if cond_vec is not None:
-                cond_vec = cond_vec.pin_memory().to(C.device, non_blocking=True)
+                if isinstance(cond_vec, list):
+                    cond_vec = [cv.pin_memory().to(C.device, non_blocking=True) for cv in cond_vec]
+                else:
+                    cond_vec = cond_vec.pin_memory().to(C.device, non_blocking=True)
         else:
             x, y = x.to(C.device), y.to(C.device)
             if cond_vec is not None:
-                cond_vec = cond_vec.to(C.device)
+                if isinstance(cond_vec, list):
+                    cond_vec = [cv.to(C.device) for cv in cond_vec]
+                else:
+                    cond_vec = cond_vec.to(C.device)
         return x, y, cond_vec
 
     iter_num = 0
@@ -422,6 +449,8 @@ if __name__ == "__main__":
         dropout=C.dropout,
         cond_dim=C.cond_dim,
     )
+    if cond_dims:
+        model_args["cond_dims"] = tuple(cond_dims)
     if C.init_from == "scratch":
         print("Initializing a new model from scratch...")
         if meta_vocab_size is None:
@@ -442,6 +471,9 @@ if __name__ == "__main__":
         #  the rest of the attributes (e.g. dropout) can stay as desired
         for k in ["n_layer", "n_head", "n_embd", "block_size", "bias", "vocab_size"]:
             model_args[k] = checkpoint_model_args[k]
+        if "cond_dims" in checkpoint_model_args:
+            model_args["cond_dims"] = tuple(checkpoint_model_args["cond_dims"])
+        model_args["cond_dim"] = checkpoint_model_args.get("cond_dim", model_args.get("cond_dim", 0))
         gptconf = GPTConfig(**model_args)
         model = GPT(gptconf)
         state_dict = checkpoint["model"]
@@ -468,7 +500,7 @@ if __name__ == "__main__":
         and (C.condition_length > 0 or C.condition_embeddings)
     ):
         for name, param in model.named_parameters():
-            if not name.startswith("cond_encoder"):
+            if not (name.startswith("cond_encoder") or name.startswith("cond_encoders")):
                 param.requires_grad = False
 
     if C.embeddings:
@@ -489,13 +521,25 @@ if __name__ == "__main__":
                     vec, dtype=model.transformer.wte.weight.dtype, device=C.device
                 )
                 if vec_t.numel() != model.transformer.wte.weight.shape[1]:
+                    converted = False
                     if model.cond_encoder is not None and vec_t.numel() == C.cond_dim:
                         vec_t = (
                             model.cond_encoder(vec_t.unsqueeze(0))
                             .squeeze(0)
                             .to(model.transformer.wte.weight.dtype)
                         )
-                    else:
+                        converted = True
+                    elif getattr(model, "cond_encoders", None) is not None:
+                        for enc in model.cond_encoders:
+                            if vec_t.numel() == enc[0].in_features:
+                                vec_t = (
+                                    enc(vec_t.unsqueeze(0))
+                                    .squeeze(0)
+                                    .to(model.transformer.wte.weight.dtype)
+                                )
+                                converted = True
+                                break
+                    if not converted:
                         raise ValueError(f"Embedding size mismatch for token {token}")
                 model.transformer.wte.weight[idx] = vec_t
 
@@ -507,7 +551,7 @@ if __name__ == "__main__":
     )
     if C.init_from == "resume" and C.cond_dim == checkpoint_model_args.get(
         "cond_dim", 0
-    ):
+    ) and tuple(cond_dims) == tuple(checkpoint_model_args.get("cond_dims", [])):
         optimizer.load_state_dict(checkpoint["optimizer"])
 
     if C.compile:

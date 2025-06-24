@@ -23,6 +23,7 @@ class GPTConfig:
     dropout: float = 0.0
     bias: bool = True
     cond_dim: int = 0  # dimensionality of optional conditioning vectors
+    cond_dims: tuple = ()  # optional list of conditioning dims for multiple encoders
 
 
 class LayerNorm(nn.Module):
@@ -158,14 +159,28 @@ class GPT(nn.Module):
             h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f=LayerNorm(config.n_embd, bias=config.bias),
         ))
-        if config.cond_dim > 0:
+        if getattr(config, "cond_dims", None):
+            self.cond_encoders = nn.ModuleList(
+                [
+                    nn.Sequential(
+                        nn.Linear(d, config.n_embd, bias=config.bias),
+                        nn.GELU(),
+                        nn.Linear(config.n_embd, config.n_embd, bias=config.bias),
+                    )
+                    for d in config.cond_dims
+                ]
+            )
+            self.cond_encoder = None
+        elif config.cond_dim > 0:
             self.cond_encoder = nn.Sequential(
                 nn.Linear(config.cond_dim, config.n_embd, bias=config.bias),
                 nn.GELU(),
                 nn.Linear(config.n_embd, config.n_embd, bias=config.bias),
             )
+            self.cond_encoders = None
         else:
             self.cond_encoder = None
+            self.cond_encoders = None
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # https://paperswithcode.com/method/weight-tying
         self.transformer.wte.weight = self.lm_head.weight
@@ -209,8 +224,16 @@ class GPT(nn.Module):
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (1, t, n_embd)
-        if self.cond_encoder is not None and cond is not None:
+        cond_proj = None
+        if self.cond_encoders is not None and cond is not None:
+            assert isinstance(cond, (list, tuple)) and len(cond) == len(self.cond_encoders)
+            cond_sum = 0
+            for vec, enc in zip(cond, self.cond_encoders):
+                cond_sum = cond_sum + enc(vec)
+            cond_proj = cond_sum.unsqueeze(1).expand(-1, t, -1)
+        elif self.cond_encoder is not None and cond is not None:
             cond_proj = self.cond_encoder(cond).unsqueeze(1).expand(-1, t, -1)
+        if cond_proj is not None:
             x = self.transformer.drop(tok_emb + pos_emb + cond_proj)
         else:
             x = self.transformer.drop(tok_emb + pos_emb)
