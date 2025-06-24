@@ -344,6 +344,8 @@ if __name__ == "__main__":
                         token = meta_cond["itos"][tok] if meta_cond is not None else meta_main["itos"][tok]
                         if token in cond_embed_dict:
                             emb_list.append(torch.tensor(cond_embed_dict[token], dtype=ptdtype))
+                        else:
+                            print(f"Warning: Missing embedding for token {token}")
                     if emb_list:
                         emb = torch.stack(emb_list).mean(dim=0)
                     else:

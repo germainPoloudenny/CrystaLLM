@@ -219,6 +219,11 @@ class GPT(nn.Module):
         device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+        if torch.any(idx >= self.config.vocab_size):
+            offending = int(torch.max(idx).item())
+            raise ValueError(
+                f"Token id {offending} exceeds embedding vocabulary size {self.config.vocab_size}"
+            )
         pos = torch.arange(0, t, dtype=torch.long, device=device).unsqueeze(0)  # shape (1, t)
 
         # forward the GPT model itself
