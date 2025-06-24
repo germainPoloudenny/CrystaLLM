@@ -127,8 +127,6 @@ def read_start_indices(
 
 if __name__ == "__main__":
 
-    from crystallm import embeddings_from_lmdb
-
     C = parse_config(TrainDefaults)
 
     print("Using configuration:")
@@ -323,6 +321,8 @@ if __name__ == "__main__":
                             emb_list.append(
                                 torch.tensor(cond_embed_dict[token], dtype=ptdtype)
                             )
+                        else:
+                            print(f"Warning: Missing embedding for token {token}")
                     if emb_list:
                         emb = torch.stack(emb_list).mean(dim=0)
                     else:
@@ -431,6 +431,8 @@ if __name__ == "__main__":
         )
         gptconf = GPTConfig(**model_args)
         model = GPT(gptconf)
+        print(model.transformer.wte.weight.shape[0] == 627)
+
     elif C.init_from == "resume":
         print(f"Resuming training from {C.out_dir}...")
         ckpt_path = os.path.join(C.out_dir, "ckpt.pt")
