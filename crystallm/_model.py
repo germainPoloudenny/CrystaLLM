@@ -22,6 +22,7 @@ class GPTConfig:
     n_embd: int = 768
     dropout: float = 0.0
     bias: bool = True
+    cond_emb_dim: int = 0
 
 
 class LayerNorm(nn.Module):
@@ -150,13 +151,23 @@ class GPT(nn.Module):
         assert config.block_size is not None
         self.config = config
 
-        self.transformer = nn.ModuleDict(dict(
-            wte=nn.Embedding(config.vocab_size, config.n_embd),
-            wpe=nn.Embedding(config.block_size, config.n_embd),
-            drop=nn.Dropout(config.dropout),
-            h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            ln_f=LayerNorm(config.n_embd, bias=config.bias),
-        ))
+        self.transformer = nn.ModuleDict(
+            dict(
+                wte=nn.Embedding(config.vocab_size, config.n_embd),
+                wpe=nn.Embedding(config.block_size, config.n_embd),
+                drop=nn.Dropout(config.dropout),
+                h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+                ln_f=LayerNorm(config.n_embd, bias=config.bias),
+            )
+        )
+
+        if config.cond_emb_dim > 0:
+            self.cond_embedding = nn.Embedding(
+                config.vocab_size, config.cond_emb_dim
+            )
+            self.cond_proj = nn.Linear(
+                config.cond_emb_dim, config.n_embd, bias=False
+            )
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # https://paperswithcode.com/method/weight-tying
         self.transformer.wte.weight = self.lm_head.weight
@@ -199,6 +210,9 @@ class GPT(nn.Module):
 
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
+        if hasattr(self, "cond_embedding"):
+            cond_emb = self.cond_proj(self.cond_embedding(idx))
+            tok_emb = tok_emb + cond_emb
         pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (1, t, n_embd)
         x = self.transformer.drop(tok_emb + pos_emb)
         for block in self.transformer.h:
@@ -240,7 +254,9 @@ class GPT(nn.Module):
         whitelist_weight_modules = (torch.nn.Linear, )
         blacklist_weight_modules = (torch.nn.LayerNorm, LayerNorm, torch.nn.Embedding)
         for mn, m in self.named_modules():
-            for pn, p in m.named_parameters():
+            for pn, p in m.named_parameters(recurse=False):
+                if not p.requires_grad:
+                    continue
                 fpn = "%s.%s" % (mn, pn) if mn else pn # full param name
                 # random note: because named_modules and named_parameters are recursive
                 # we will see the same tensors p many many times. but doing it this way
@@ -261,10 +277,12 @@ class GPT(nn.Module):
         # will only return the first occurrence, keyed by "transformer.wte.weight", below.
         # so let's manually remove "lm_head.weight" from decay set. This will include
         # this tensor into optimization via transformer.wte.weight only, and not decayed.
-        decay.remove("lm_head.weight")
+        decay.discard("lm_head.weight") 
 
         # validate that we considered every parameter
-        param_dict = {pn: p for pn, p in self.named_parameters()}
+        param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
+        decay = {pn for pn in decay if pn in param_dict}
+        no_decay = {pn for pn in no_decay if pn in param_dict}
         inter_params = decay & no_decay
         union_params = decay | no_decay
         assert len(inter_params) == 0, "parameters %s made it into both decay/no_decay sets!" % (str(inter_params), )

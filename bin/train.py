@@ -37,6 +37,7 @@ class TrainDefaults:
 
     # data
     dataset: str = ""  # the path to the folder containing the .bin files with encoded tokens
+    cond_embeddings: str = ""  # LMDB file with conditioning embeddings
     dataset_fraction: float = 1.0  # proportion of the dataset to use
     gradient_accumulation_steps: int = 40  # used to simulate larger batch sizes
     batch_size: int = 64  # if gradient_accumulation_steps > 1, this is the micro-batch size
@@ -196,8 +197,33 @@ if __name__ == "__main__":
         meta_vocab_size = meta["vocab_size"]
         print(f"Found vocab_size = {meta_vocab_size} (inside {meta_path})")
 
-    model_args = dict(n_layer=C.n_layer, n_head=C.n_head, n_embd=C.n_embd, block_size=C.block_size,
-                      bias=C.bias, vocab_size=None, dropout=C.dropout)
+    cond_matrix = None
+    if C.cond_embeddings:
+        from crystallm import embeddings_from_lmdb
+        print(f"Loading conditioning embeddings from {C.cond_embeddings}...")
+        cond_data = embeddings_from_lmdb(C.cond_embeddings)
+        first_vec = next(iter(cond_data.values()))
+        cond_dim = len(first_vec)
+        print(f"Conditioning embedding dimension = {cond_dim}")
+        if meta_vocab_size is None:
+            raise ValueError("conditioning requires meta.pkl with vocab")
+        cond_matrix = torch.zeros((meta_vocab_size, cond_dim), dtype=torch.float32)
+        for tok, idx in meta["stoi"].items():
+            vec = cond_data.get(tok)
+            if vec is not None:
+                cond_matrix[idx] = torch.tensor(vec, dtype=torch.float32)
+
+    model_args = dict(
+        n_layer=C.n_layer,
+        n_head=C.n_head,
+        n_embd=C.n_embd,
+        block_size=C.block_size,
+        bias=C.bias,
+        vocab_size=None,
+        dropout=C.dropout,
+    )
+    if cond_matrix is not None:
+        model_args["cond_emb_dim"] = cond_matrix.shape[1]
     if C.init_from == "scratch":
         print("Initializing a new model from scratch...")
         if meta_vocab_size is None:
@@ -212,8 +238,9 @@ if __name__ == "__main__":
         checkpoint_model_args = checkpoint["model_args"]
         # force these config attributes to be equal otherwise we can't even resume training;
         #  the rest of the attributes (e.g. dropout) can stay as desired
-        for k in ["n_layer", "n_head", "n_embd", "block_size", "bias", "vocab_size"]:
-            model_args[k] = checkpoint_model_args[k]
+        for k in ["n_layer", "n_head", "n_embd", "block_size", "bias", "vocab_size", "cond_emb_dim"]:
+            if k in checkpoint_model_args:
+                model_args[k] = checkpoint_model_args[k]
         gptconf = GPTConfig(**model_args)
         model = GPT(gptconf)
         state_dict = checkpoint["model"]
@@ -226,10 +253,19 @@ if __name__ == "__main__":
         iter_num = checkpoint["iter_num"]
         best_val_loss = checkpoint["best_val_loss"]
 
+    if cond_matrix is not None:
+        model.cond_embedding.weight.data.copy_(cond_matrix)
+        model.cond_embedding.weight.requires_grad = False
+
     # crop down the model block size if desired, using model surgery
     if C.block_size < model.config.block_size:
         model.crop_block_size(C.block_size)
         model_args["block_size"] = C.block_size  # so that the checkpoint will have the right value
+    for name, param in model.named_parameters():
+        param.requires_grad = False
+    if cond_matrix is not None:
+        for param in model.cond_proj.parameters():
+            param.requires_grad = True
     model.to(C.device)
 
     # initialize a GradScaler; if enabled=False scaler is a no-op
