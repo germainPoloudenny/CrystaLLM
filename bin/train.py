@@ -202,7 +202,7 @@ if __name__ == "__main__":
     cond_train = None
     cond_val = None
     cond_embed_dict = None
-    cond_meta = None
+    meta_cond = None
     if C.condition_dataset:
         cond_train_full = np.memmap(
             os.path.join(C.condition_dataset, "train.bin"), dtype=np.uint16, mode="r"
@@ -220,9 +220,9 @@ if __name__ == "__main__":
         meta_path = os.path.join(C.condition_dataset, "meta.pkl")
         if os.path.exists(meta_path):
             with open(meta_path, "rb") as f:
-                cond_meta = pickle.load(f)
-            if C.condition_length == 0 and "condition_length" in cond_meta:
-                C.condition_length = cond_meta["condition_length"]
+                meta_cond = pickle.load(f)
+            if C.condition_length == 0 and "condition_length" in meta_cond:
+                C.condition_length = meta_cond["condition_length"]
                 print(
                     f"Using condition_length = {C.condition_length} from {meta_path}"
                 )
@@ -315,7 +315,10 @@ if __name__ == "__main__":
                 for row in cond:
                     emb_list = []
                     for tok in row.tolist():
-                        token = meta["itos"][tok]
+                        if meta_cond is not None:
+                            token = meta_cond["itos"][tok]
+                        else:
+                            token = meta_main["itos"][tok]
                         if token in cond_embed_dict:
                             emb_list.append(
                                 torch.tensor(cond_embed_dict[token], dtype=ptdtype)
@@ -350,24 +353,24 @@ if __name__ == "__main__":
     iter_num = 0
     best_val_loss = 1e9
 
-    meta_path = os.path.join(C.dataset, "meta.pkl")
-    meta_vocab_size = None
-    meta = None
-    if os.path.exists(meta_path):
-        with open(meta_path, "rb") as f:
-            meta = pickle.load(f)
-        meta_vocab_size = meta.get("vocab_size", len(meta["itos"]))
-        print(f"Found vocab_size = {meta_vocab_size} (inside {meta_path})")
+    meta_main_path = os.path.join(C.dataset, "meta.pkl")
+    meta_main_vocab_size = None
+    meta_main = None
+    if os.path.exists(meta_main_path):
+        with open(meta_main_path, "rb") as f:
+            meta_main = pickle.load(f)
+        meta_main_vocab_size = meta_main.get("vocab_size", len(meta_main["itos"]))
+        print(f"Found vocab_size = {meta_main_vocab_size} (inside {meta_main_path})")
 
-    cond_meta_path = (
+    meta_cond_path = (
         os.path.join(C.condition_dataset, "meta.pkl") if C.condition_dataset else None
     )
-    if cond_meta is not None:
-        meta = cond_meta
-        meta_vocab_size = meta.get("vocab_size", len(meta["itos"]))
-        if cond_meta_path:
+    meta_cond_vocab_size = None
+    if meta_cond is not None:
+        meta_cond_vocab_size = meta_cond.get("vocab_size", len(meta_cond["itos"]))
+        if meta_cond_path:
             print(
-                f"Using combined vocab_size = {meta_vocab_size} from {cond_meta_path}"
+                f"Using conditioning vocab_size = {meta_cond_vocab_size} from {meta_cond_path}"
             )
 
     # Determine the maximum token id present in the loaded datasets
@@ -393,17 +396,21 @@ if __name__ == "__main__":
 
     detected_vocab_size = max(m for m, _ in dataset_maxes) + 1
 
-    if meta_vocab_size is None:
-        meta_vocab_size = detected_vocab_size
-        print(f"Detected vocab_size = {meta_vocab_size} from data")
-    else:
-        for max_id, path in dataset_maxes:
-            if path is None:
-                continue
-            if max_id >= meta_vocab_size:
-                raise ValueError(
-                    f"Token id {max_id} in {path} exceeds vocab_size {meta_vocab_size}"
-                )
+    meta_vocab_candidates = [detected_vocab_size]
+    if meta_main_vocab_size is not None:
+        meta_vocab_candidates.append(meta_main_vocab_size)
+    if meta_cond_vocab_size is not None:
+        meta_vocab_candidates.append(meta_cond_vocab_size)
+    meta_vocab_size = max(meta_vocab_candidates)
+    print(f"Using vocab_size = {meta_vocab_size}")
+
+    for max_id, path in dataset_maxes:
+        if path is None:
+            continue
+        if max_id >= meta_vocab_size:
+            raise ValueError(
+                f"Token id {max_id} in {path} exceeds vocab_size {meta_vocab_size}"
+            )
 
     model_args = dict(
         n_layer=C.n_layer,
@@ -473,9 +480,9 @@ if __name__ == "__main__":
         embed_dict = _load_embed(C.embeddings)
         with torch.no_grad():
             for token, vec in embed_dict.items():
-                if token not in meta["stoi"]:
+                if token not in meta_main["stoi"]:
                     continue
-                idx = meta["stoi"][token]
+                idx = meta_main["stoi"][token]
                 vec_t = torch.tensor(
                     vec, dtype=model.transformer.wte.weight.dtype, device=C.device
                 )
