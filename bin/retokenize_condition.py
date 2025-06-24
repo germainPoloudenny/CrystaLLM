@@ -72,7 +72,32 @@ def encode_sequences(cif_list, tokenizer, stoi, itos, keep_unknown=False):
         return np.array(encoded, dtype=np.uint16)
     return encoded
 
-def copy_embedding_lmdb_with_token_names(input_path, output_path, prefix="<amp_", dim=500):
+def copy_embedding_lmdb_with_token_names(
+    input_path,
+    output_path,
+    prefix="<amp_",
+    *,
+    include_db_index=False,
+    dim=500,
+):
+    """Copy embeddings from an LMDB and rename keys using token strings.
+
+    Parameters
+    ----------
+    input_path : str
+        Path to the source LMDB containing the embeddings.
+    output_path : str
+        Destination LMDB where renamed embeddings will be written.
+    prefix : str, optional
+        Prefix to prepend to each token id. Defaults to ``"<amp_"``.
+    include_db_index : bool, optional
+        When ``True`` the sub-database index is appended to each key. The
+        default ``False`` produces keys of the form ``<amp_0>`` which match the
+        tokens produced by :func:`encode_sequences`.
+    dim : int, optional
+        Expected embedding dimensionality (unused but kept for backwards
+        compatibility).
+    """
     import lmdb
     import pickle
 
@@ -94,7 +119,10 @@ def copy_embedding_lmdb_with_token_names(input_path, output_path, prefix="<amp_"
                     try:
                         vec = pickle.loads(raw_val)
                         key_str = raw_key.decode("utf-8") if isinstance(raw_key, bytes) else str(raw_key)
-                        new_key = f"{prefix}{key_str}_{db_idx}>"
+                        if include_db_index:
+                            new_key = f"{prefix}{key_str}_{db_idx}>"
+                        else:
+                            new_key = f"{prefix}{key_str}>"
                         txn_out.put(new_key.encode("utf-8"), pickle.dumps(vec))
                     except Exception as e:
                         print(f"Skipped key {raw_key} in sub_db {db_idx}: {e}")
