@@ -249,7 +249,7 @@ if __name__ == "__main__":
         for k, v in list(state_dict.items()):
             if k.startswith(unwanted_prefix):
                 state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
-        model.load_state_dict(state_dict)
+        model.load_state_dict(state_dict, strict=False)
         iter_num = checkpoint["iter_num"]
         best_val_loss = checkpoint["best_val_loss"]
 
@@ -272,8 +272,8 @@ if __name__ == "__main__":
     scaler = torch.cuda.amp.GradScaler(enabled=(C.dtype == "float16"))
 
     optimizer = model.configure_optimizers(C.weight_decay, C.learning_rate, (C.beta1, C.beta2))
-    if C.init_from == "resume":
-        optimizer.load_state_dict(checkpoint["optimizer"])
+    # if C.init_from == "resume":
+    #     optimizer.load_state_dict(checkpoint["optimizer"])
 
     if C.compile:
         print("Compiling the model (takes a ~minute)...")

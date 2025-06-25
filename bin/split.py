@@ -45,10 +45,10 @@ if __name__ == "__main__":
     print("splitting dataset...")
 
     cifs_train, cifs_test = train_test_split(cifs, test_size=test_size,
-                                             shuffle=True, random_state=random_state)
+                                             shuffle=False, random_state=random_state)
 
     cifs_train, cifs_val = train_test_split(cifs_train, test_size=validation_size,
-                                            shuffle=True, random_state=random_state)
+                                            shuffle=False, random_state=random_state)
 
     print(f"number of CIFs in train set: {len(cifs_train):,}")
     print(f"number of CIFs in validation set: {len(cifs_val):,}")
