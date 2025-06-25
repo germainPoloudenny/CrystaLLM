@@ -38,6 +38,8 @@ class TrainDefaults:
     # data
     dataset: str = ""  # the path to the folder containing the .bin files with encoded tokens
     cond_embeddings: str = ""  # LMDB file with conditioning embeddings
+    condition_dataset: str = ""  # optional dataset with conditioning tokens
+    condition_length: int = 0  # length of conditioning prefix
     dataset_fraction: float = 1.0  # proportion of the dataset to use
     gradient_accumulation_steps: int = 40  # used to simulate larger batch sizes
     batch_size: int = 64  # if gradient_accumulation_steps > 1, this is the micro-batch size
@@ -133,6 +135,26 @@ if __name__ == "__main__":
     train_data = np.memmap(os.path.join(C.dataset, "train.bin"), dtype=np.uint16, mode="r")
     val_data = np.memmap(os.path.join(C.dataset, "val.bin"), dtype=np.uint16, mode="r") if C.validate else None
 
+    cond_train_data = None
+    cond_val_data = None
+    if C.condition_dataset:
+        cond_train_data = np.memmap(
+            os.path.join(C.condition_dataset, "train.bin"), dtype=np.uint16, mode="r"
+        )
+        cond_val_data = (
+            np.memmap(os.path.join(C.condition_dataset, "val.bin"), dtype=np.uint16, mode="r")
+            if C.validate
+            else None
+        )
+        cond_meta_path = os.path.join(C.condition_dataset, "meta.pkl")
+        if os.path.exists(cond_meta_path):
+            with open(cond_meta_path, "rb") as f:
+                cond_meta = pickle.load(f)
+            if C.condition_length <= 0:
+                C.condition_length = int(cond_meta.get("condition_length", 0))
+        if C.condition_length <= 0:
+            raise ValueError("condition_length must be > 0 when using condition_dataset")
+
     if not 0 < C.dataset_fraction <= 1.0:
         raise ValueError("dataset_fraction must be in the (0, 1] range")
     train_len = int(len(train_data) * C.dataset_fraction)
@@ -166,6 +188,7 @@ if __name__ == "__main__":
 
     def get_batch(split):
         data = train_data if split == "train" else val_data
+        cond_data = cond_train_data if split == "train" else cond_val_data
 
         ix = torch.randint(len(data) - C.block_size, (C.batch_size,))
         if split == "train":
@@ -178,6 +201,16 @@ if __name__ == "__main__":
 
         x = torch.stack([torch.from_numpy((data[i:i + C.block_size]).astype(np.int64)) for i in ix])
         y = torch.stack([torch.from_numpy((data[i + 1:i + 1 + C.block_size]).astype(np.int64)) for i in ix])
+
+        if cond_data is not None:
+            cond_ix = torch.randint(len(cond_data) - C.condition_length, (C.batch_size,))
+            cond_x = torch.stack([
+                torch.from_numpy((cond_data[i:i + C.condition_length]).astype(np.int64))
+                for i in cond_ix
+            ])
+            cond_y = torch.full_like(cond_x, -1)
+            x = torch.cat([cond_x, x], dim=1)
+            y = torch.cat([cond_y, y], dim=1)
 
         if device_type == "cuda":
             # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
@@ -213,11 +246,13 @@ if __name__ == "__main__":
             if vec is not None:
                 cond_matrix[idx] = torch.tensor(vec, dtype=torch.float32)
 
+    total_block_size = C.block_size + (C.condition_length if C.condition_dataset else 0)
+
     model_args = dict(
         n_layer=C.n_layer,
         n_head=C.n_head,
         n_embd=C.n_embd,
-        block_size=C.block_size,
+        block_size=total_block_size,
         bias=C.bias,
         vocab_size=None,
         dropout=C.dropout,
@@ -258,9 +293,9 @@ if __name__ == "__main__":
         model.cond_embedding.weight.requires_grad = False
 
     # crop down the model block size if desired, using model surgery
-    if C.block_size < model.config.block_size:
-        model.crop_block_size(C.block_size)
-        model_args["block_size"] = C.block_size  # so that the checkpoint will have the right value
+    if total_block_size < model.config.block_size:
+        model.crop_block_size(total_block_size)
+        model_args["block_size"] = total_block_size  # so that the checkpoint will have the right value
     for name, param in model.named_parameters():
         param.requires_grad = False
     if cond_matrix is not None:
