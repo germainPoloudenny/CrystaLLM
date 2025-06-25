@@ -210,6 +210,9 @@ class GPT(nn.Module):
 
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
+        if self.config.cond_emb_dim > 0:
+            cond_emb = self.cond_embedding(idx)
+            tok_emb = tok_emb + self.cond_proj(cond_emb)
         pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (1, t, n_embd)
         x = self.transformer.drop(tok_emb + pos_emb)
         for block in self.transformer.h:
