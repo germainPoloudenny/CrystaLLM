@@ -8,6 +8,7 @@ from typing import Union
 from torch.utils.tensorboard import SummaryWriter
 import math
 import time
+import shutil
 
 from crystallm import parse_config
 from omegaconf import OmegaConf
@@ -102,8 +103,17 @@ if __name__ == "__main__":
     print("Using configuration:")
     print(OmegaConf.to_yaml(C))
 
-    print(f"Creating {C.out_dir}...")
-    os.makedirs(C.out_dir, exist_ok=True)
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    load_dir = C.out_dir
+    C.out_dir = f"{C.out_dir}_{timestamp}"
+
+    if C.init_from == "resume":
+        print(f"Resuming training from {load_dir}...")
+        print(f"Creating clone directory {C.out_dir}...")
+        shutil.copytree(load_dir, C.out_dir, dirs_exist_ok=True)
+    else:
+        print(f"Creating {C.out_dir}...")
+        os.makedirs(C.out_dir, exist_ok=True)
 
     if C.tensorboard_dir is None:
         C.tensorboard_dir = C.out_dir
@@ -267,8 +277,8 @@ if __name__ == "__main__":
         gptconf = GPTConfig(**model_args)
         model = GPT(gptconf)
     elif C.init_from == "resume":
-        print(f"Resuming training from {C.out_dir}...")
-        ckpt_path = os.path.join(C.out_dir, "ckpt.pt")
+        print(f"Loading checkpoint from {load_dir}...")
+        ckpt_path = os.path.join(load_dir, "ckpt.pt")
         checkpoint = torch.load(ckpt_path, map_location="cpu")
         checkpoint_model_args = checkpoint["model_args"]
         # force these config attributes to be equal otherwise we can't even resume training;
