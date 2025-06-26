@@ -296,8 +296,9 @@ if __name__ == "__main__":
     if total_block_size < model.config.block_size:
         model.crop_block_size(total_block_size)
         model_args["block_size"] = total_block_size  # so that the checkpoint will have the right value
-    for name, param in model.named_parameters():
-        param.requires_grad = False
+    if C.cond_embeddings:
+        for name, param in model.named_parameters():
+            param.requires_grad = False
     if cond_matrix is not None:
         for param in model.cond_proj.parameters():
             param.requires_grad = True

@@ -87,7 +87,7 @@ if __name__ == "__main__":
             cifs_raw_val = pickle.load(f)
 
     # shuffle the order of the train CIFs
-    random.shuffle(cifs_raw_train)
+    #random.shuffle(cifs_raw_train)
 
     cifs_train = preprocess(cifs_raw_train)
     if has_val:

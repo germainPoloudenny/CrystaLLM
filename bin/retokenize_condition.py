@@ -185,8 +185,8 @@ if __name__ == '__main__':
         if not sequences:
             raise ValueError('LMDB contains no sequences')
 
-        rng = np.random.default_rng(0)
-        rng.shuffle(sequences)
+        #rng = np.random.default_rng(0)
+        #rng.shuffle(sequences)
         split_idx = int(len(sequences) * args.train_fraction)
         train_pairs = sequences[:split_idx]
         val_pairs = sequences[split_idx:]
