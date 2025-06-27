@@ -240,6 +240,23 @@ class GPT(nn.Module):
         for block in self.transformer.h:
             block.attn.bias = block.attn.bias[:,:,:block_size,:block_size]
 
+    def expand_block_size(self, block_size: int):
+        """Increase the block size of the model if needed."""
+        assert block_size >= self.config.block_size
+        if block_size == self.config.block_size:
+            return
+        old_bs = self.config.block_size
+        device = self.transformer.wpe.weight.device
+        dtype = self.transformer.wpe.weight.dtype
+        extra = torch.zeros(block_size - old_bs, self.config.n_embd, device=device, dtype=dtype)
+        self.transformer.wpe.weight = nn.Parameter(torch.cat([self.transformer.wpe.weight, extra], dim=0))
+        for block in self.transformer.h:
+            if not block.attn.flash:
+                new_bias = torch.tril(torch.ones(block_size, block_size, device=device))
+                new_bias = new_bias.view(1, 1, block_size, block_size)
+                block.attn.bias = new_bias
+        self.config.block_size = block_size
+
     def configure_optimizers(self, weight_decay, learning_rate, betas):
         """
         This long function is unfortunately doing something very simple and is being very defensive:

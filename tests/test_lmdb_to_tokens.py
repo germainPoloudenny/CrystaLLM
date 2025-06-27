@@ -1,9 +1,18 @@
 import os
 import argparse
-import numpy as np
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - optional dependency for CI
+    np = None
 
-from crystallm import sequences_from_lmdb
-import lmdb
+try:
+    from crystallm import sequences_from_lmdb
+except Exception:  # pragma: no cover - optional dependency for CI
+    sequences_from_lmdb = None
+try:
+    import lmdb
+except ImportError:  # pragma: no cover - optional dependency for CI
+    lmdb = None
 import pickle
 
 
@@ -15,6 +24,8 @@ def main(args):
     sequences must have the same length so that the resulting binaries can be
     used as a ``condition_dataset`` when training the language model.
     """
+    if np is None or sequences_from_lmdb is None or lmdb is None:
+        raise ImportError("numpy, lmdb and crystallm utilities are required to run this script")
 
     # Load sequences from the LMDB
     sequences = sequences_from_lmdb(args.lmdb_path, sub_db=args.sub_db)

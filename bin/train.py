@@ -288,6 +288,7 @@ if __name__ == "__main__":
         ckpt_path = os.path.join(load_dir, ckpt_filename)
         checkpoint = torch.load(ckpt_path, map_location="cpu")
         checkpoint_model_args = checkpoint["model_args"]
+        ckpt_block_size = checkpoint_model_args.get("block_size", total_block_size)
         # force these config attributes to be equal otherwise we can't even resume training;
         #  the rest of the attributes (e.g. dropout) can stay as desired
         for k in ["n_layer", "n_head", "n_embd", "block_size", "bias", "vocab_size", "cond_emb_dim"]:
@@ -304,6 +305,9 @@ if __name__ == "__main__":
         model.load_state_dict(state_dict, strict=False)
         iter_num = checkpoint["iter_num"]
         best_val_loss = checkpoint["best_val_loss"]
+        if total_block_size > ckpt_block_size:
+            model.expand_block_size(total_block_size)
+            model_args["block_size"] = total_block_size
 
     if cond_matrix is not None:
         model.cond_embedding.weight.data.copy_(cond_matrix)
