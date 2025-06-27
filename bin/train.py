@@ -302,9 +302,6 @@ if __name__ == "__main__":
             if k.startswith(unwanted_prefix):
                 state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
         model.load_state_dict(state_dict, strict=False)
-        if total_block_size > model.config.block_size:
-            model.expand_block_size(total_block_size)
-            model_args["block_size"] = total_block_size
         iter_num = checkpoint["iter_num"]
         best_val_loss = checkpoint["best_val_loss"]
 
