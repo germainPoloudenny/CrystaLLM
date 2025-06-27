@@ -1,8 +1,6 @@
 import os
-import gzip
 import pickle
 import argparse
-import sys
 
 try:
     import numpy as np
@@ -21,12 +19,7 @@ except Exception:
     CIFTokenizer = None
     sequences_from_lmdb = None
 
-def load_pickle(path):
-    open_fn = gzip.open if path.endswith('.gz') else open
-    with open_fn(path, 'rb') as f:
-        return pickle.load(f)
-
-def encode_sequences(cif_list, tokenizer, stoi, itos, keep_unknown=False):
+def encode_sequences(cif_list, tokenizer, stoi, itos):
     encoded = []
     for item in tqdm(cif_list, desc="encoding sequences"):
         if (
@@ -60,7 +53,8 @@ def encode_sequences(cif_list, tokenizer, stoi, itos, keep_unknown=False):
                 tokens = [f"<amp_{int(v)}>" for v in values]
 
         if tokens is None:
-            tokens = tokenizer.tokenize_cif(str(cif), keep_unknown=keep_unknown)
+            # keep_unknown=True ensures new tokens are added to the vocabulary
+            tokens = tokenizer.tokenize_cif(str(cif), keep_unknown=True)
 
         for tok in tokens:
             if tok not in stoi:
@@ -73,103 +67,15 @@ def encode_sequences(cif_list, tokenizer, stoi, itos, keep_unknown=False):
         return np.array(encoded, dtype=np.uint16)
     return encoded
 
-def copy_embedding_lmdb_with_token_names(
-    input_path,
-    output_path,
-    prefix="<amp_",
-    *,
-    include_db_index=False,
-    dim=500,
-):
-    """Copy embeddings from an LMDB and rename keys using token strings.
-
-    Parameters
-    ----------
-    input_path : str
-        Path to the source LMDB containing the embeddings.
-    output_path : str
-        Destination LMDB where renamed embeddings will be written.
-    prefix : str, optional
-        Prefix to prepend to each token id. Defaults to ``"<amp_"``.
-    include_db_index : bool, optional
-        When ``True`` the sub-database index is appended to each key. The
-        default ``False`` produces keys of the form ``<amp_0>`` which match the
-        tokens produced by :func:`encode_sequences`.
-    dim : int, optional
-        Expected embedding dimensionality (unused but kept for backwards
-        compatibility).
-    """
-    import lmdb
-    import pickle
-
-    env_in = lmdb.open(input_path, readonly=True, lock=False, max_dbs=10)
-    env_out = lmdb.open(output_path, map_size=int(1e12))
-
-    # Lire le nombre de sous-bases
-    with env_in.begin() as txn:
-        num_dbs = int(txn.get(b"num_dbs").decode())
-
-    # Ouvrir toutes les sous-bases
-    sub_dbs_in = [env_in.open_db(str(i).encode()) for i in range(num_dbs)]
-
-    first_dim = None
-    with env_out.begin(write=True) as txn_out:
-        for db_idx, sub_db in enumerate(sub_dbs_in):
-            with env_in.begin(db=sub_db) as txn_in:
-                cursor = txn_in.cursor()
-                for raw_key, raw_val in tqdm(cursor, desc=f"copying embeddings from sub_db {db_idx}"):
-                    try:
-                        vec = pickle.loads(raw_val)
-                        if first_dim is None and hasattr(vec, "__len__"):
-                            first_dim = len(vec)
-                            print(f"Detected embedding dimension = {first_dim}")
-                        key_str = raw_key.decode("utf-8") if isinstance(raw_key, bytes) else str(raw_key)
-                        if include_db_index:
-                            new_key = f"{prefix}{key_str}_{db_idx}>"
-                        else:
-                            new_key = f"{prefix}{key_str}>"
-                        txn_out.put(new_key.encode("utf-8"), pickle.dumps(vec))
-                    except Exception as e:
-                        print(f"Skipped key {raw_key} in sub_db {db_idx}: {e}")
-    if first_dim is not None and dim and dim != first_dim:
-        print(f"Warning: expected embedding dimension {dim} but found {first_dim}")
-    return first_dim
-
-
-def inspect_embedding_dim(lmdb_path):
-    """Print the dimension of the first embedding in an LMDB."""
-    import lmdb
-    import pickle
-
-    env = lmdb.open(lmdb_path, readonly=True, lock=False, max_dbs=10)
-    with env.begin() as txn:
-        cursor = txn.cursor()
-        for _, raw_val in cursor:
-            try:
-                vec = pickle.loads(raw_val)
-                if hasattr(vec, "__len__"):
-                    print(f"Embedding dimension = {len(vec)}")
-                else:
-                    print("Unable to determine embedding dimension")
-            except Exception as exc:
-                print(f"Failed to read embedding: {exc}")
-            break
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Retokenize dataset with updated meta.pkl')
-    parser.add_argument('--lmdb_path', default='', help='LMDB containing CIF strings')
+    parser.add_argument('--lmdb_path', required=True, help='LMDB containing CIF strings')
     parser.add_argument('--sub_db', type=int, default=0, help='LMDB sub-database index')
     parser.add_argument('--train_fraction', type=float, default=0.9, help='Train split fraction when using LMDB')
     parser.add_argument('--meta_path', required=True, help='Path to meta.pkl from main dataset')
     parser.add_argument('--out_dir', required=True, help='Directory to write train.bin/val.bin')
-    parser.add_argument('--keep_unknown', action='store_true', help='Keep unknown tokens instead of replacing them with <unk>')
-    parser.add_argument('--output_embeddings', action='store_true', help='Copy existing LMDB embeddings and rename keys to match <amp_*> format')
-    parser.add_argument('--inspect_embeddings', default='', help='Print the dimension of embeddings stored in the given LMDB and exit')
     args = parser.parse_args()
-
-    if args.inspect_embeddings:
-        inspect_embedding_dim(args.inspect_embeddings)
-        sys.exit(0)
 
     os.makedirs(args.out_dir, exist_ok=True)
 
@@ -193,11 +99,11 @@ if __name__ == '__main__':
     else:
         parser.error('Currently only LMDB input is supported')
 
-    train_ids = encode_sequences(train_pairs, tokenizer, stoi, itos, keep_unknown=args.keep_unknown)
+    train_ids = encode_sequences(train_pairs, tokenizer, stoi, itos)
     train_ids.tofile(os.path.join(args.out_dir, 'train.bin'))
 
     if val_pairs:
-        val_ids = encode_sequences(val_pairs, tokenizer, stoi, itos, keep_unknown=args.keep_unknown)
+        val_ids = encode_sequences(val_pairs, tokenizer, stoi, itos)
         val_ids.tofile(os.path.join(args.out_dir, 'val.bin'))
 
     updated_meta = {
@@ -208,8 +114,5 @@ if __name__ == '__main__':
     with open(os.path.join(args.out_dir, 'meta.pkl'), 'wb') as f:
         pickle.dump(updated_meta, f)
 
-    if args.output_embeddings:
-        emb_path = os.path.join(args.out_dir, "amp_embeddings.lmdb")
-        copy_embedding_lmdb_with_token_names("data/version_0_last.lmdb", emb_path)
-        print(f"Copied embeddings to: {emb_path}")
+
 

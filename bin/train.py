@@ -234,7 +234,10 @@ if __name__ == "__main__":
     iter_num = 0
     best_val_loss = 1e9
 
-    meta_path = os.path.join(C.dataset, "meta.pkl")
+    if C.condition_dataset:
+        meta_path = os.path.join(C.condition_dataset, "meta.pkl")
+    else:
+        meta_path = os.path.join(C.dataset, "meta.pkl")
     meta_vocab_size = None
     if os.path.exists(meta_path):
         with open(meta_path, "rb") as f:
