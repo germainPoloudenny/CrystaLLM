@@ -58,6 +58,8 @@ def expand_checkpoint(ckpt_path: str, meta_path: str, out_path: str) -> None:
         return
 
     pad = torch.zeros(new_vocab_size - old_vocab_size, emb_dim, dtype=old_weight.dtype)
+    # expand the embedding matrix itself
+    state[old_weight_key] = torch.cat([old_weight, pad], dim=0)
     # Try to find and expand lm_head.weight
     possible_lm_head_keys = [
         "lm_head.weight",
