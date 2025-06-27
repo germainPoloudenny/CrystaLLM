@@ -74,6 +74,7 @@ class TrainDefaults:
     backend: str = "nccl"
     underrep_p: float = 0.0
     validate: bool = False  # whether to evaluate the model using the validation set
+    use_ckpt_expanded: bool = False  # load ckpt_expanded.pt instead of ckpt.pt when resuming
 
 
 def read_start_indices(
@@ -106,6 +107,7 @@ if __name__ == "__main__":
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     load_dir = C.out_dir
     C.out_dir = f"{C.out_dir}_{timestamp}"
+    ckpt_filename = "ckpt_expanded.pt" if C.use_ckpt_expanded else "ckpt.pt"
 
     if C.init_from == "resume":
         print(f"Resuming training from {load_dir}...")
@@ -283,7 +285,7 @@ if __name__ == "__main__":
         model = GPT(gptconf)
     elif C.init_from == "resume":
         print(f"Loading checkpoint from {load_dir}...")
-        ckpt_path = os.path.join(load_dir, "ckpt.pt")
+        ckpt_path = os.path.join(load_dir, ckpt_filename)
         checkpoint = torch.load(ckpt_path, map_location="cpu")
         checkpoint_model_args = checkpoint["model_args"]
         # force these config attributes to be equal otherwise we can't even resume training;
@@ -409,7 +411,7 @@ if __name__ == "__main__":
                         "config": dict(C),
                     }
                     print(f"saving checkpoint to {C.out_dir}...")
-                    torch.save(checkpoint, os.path.join(C.out_dir, "ckpt.pt"))
+                    torch.save(checkpoint, os.path.join(C.out_dir, ckpt_filename))
             if torch.is_tensor(best_val_loss):
                 loss_tensor = best_val_loss.clone().detach().to(C.device)
             else:
