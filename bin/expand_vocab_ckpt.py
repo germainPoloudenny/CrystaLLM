@@ -24,8 +24,32 @@ def expand_checkpoint(ckpt_path: str, meta_path: str, out_path: str) -> None:
     state = checkpoint["model"]
     model_args = checkpoint.get("model_args", {})
 
-    old_weight = state["transformer.wte.weight"]
+    # In older or slightly different checkpoints the embedding weights may be
+    # stored under a variety of keys. Try to locate the token embedding weight
+    # tensor by checking a few common suffixes.
+    possible_wte_keys = [
+        "transformer.wte.weight",
+        "tok_embeddings.weight",
+        "word_embeddings.weight",
+    ]
+    old_weight_key = None
+    for key in state.keys():
+        for suffix in possible_wte_keys:
+            if key.endswith(suffix):
+                old_weight_key = key
+                break
+        if old_weight_key:
+            break
+
+    if old_weight_key is None:
+        raise KeyError(
+            "Token embedding weights not found in checkpoint state. Tried keys: "
+            + ", ".join(possible_wte_keys)
+        )
+
+    old_weight = state[old_weight_key]
     old_vocab_size, emb_dim = old_weight.shape
+    print(old_vocab_size)
     if new_vocab_size < old_vocab_size:
         raise ValueError("new vocab size must be >= old vocab size")
     if new_vocab_size == old_vocab_size:
@@ -34,8 +58,55 @@ def expand_checkpoint(ckpt_path: str, meta_path: str, out_path: str) -> None:
         return
 
     pad = torch.zeros(new_vocab_size - old_vocab_size, emb_dim, dtype=old_weight.dtype)
-    state["transformer.wte.weight"] = torch.cat([old_weight, pad], dim=0)
-    state["lm_head.weight"] = torch.cat([state["lm_head.weight"], pad.clone()], dim=0)
+    # Try to find and expand lm_head.weight
+    possible_lm_head_keys = [
+        "lm_head.weight",
+        "output.weight",
+        "head.weight"
+    ]
+
+    lm_head_key = None
+    for key in state.keys():
+        for suffix in possible_lm_head_keys:
+            if key.endswith(suffix):
+                lm_head_key = key
+                break
+        if lm_head_key:
+            break
+
+    if lm_head_key:
+        lm_weight = state[lm_head_key]
+        if lm_weight.shape[0] == old_vocab_size:
+            state[lm_head_key] = torch.cat([lm_weight, pad.clone()], dim=0)
+        else:
+            print(f"Warning: Expected lm_head vocab size {old_vocab_size}, but got {lm_weight.shape[0]}. Skipping lm_head.weight expansion.")
+    else:
+        print("Warning: lm_head.weight not found. Skipping its expansion.")
+    # Try to find and expand lm_head.weight
+    possible_lm_head_keys = [
+        "lm_head.weight",
+        "output.weight",
+        "head.weight"
+    ]
+
+    lm_head_key = None
+    for key in state:
+        for suffix in possible_lm_head_keys:
+            if key.endswith(suffix):
+                lm_head_key = key
+                break
+        if lm_head_key:
+            break
+
+    if lm_head_key:
+        lm_weight = state[lm_head_key]
+        if lm_weight.shape[0] == old_vocab_size:
+            state[lm_head_key] = torch.cat([lm_weight, pad.clone()], dim=0)
+            print(f"Expanded {lm_head_key} to match new vocab size.")
+        else:
+            print(f"Warning: {lm_head_key} has unexpected vocab size {lm_weight.shape[0]}. Skipping expansion.")
+    else:
+        print("Warning: No lm_head.weight found. Skipping its expansion.")
 
     if "cond_embedding.weight" in state:
         cond_weight = state["cond_embedding.weight"]
