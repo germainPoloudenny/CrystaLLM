@@ -217,7 +217,7 @@ if __name__ == "__main__":
         y = torch.stack([torch.from_numpy((data[i + 1:i + 1 + C.block_size]).astype(np.int64)) for i in ix])
 
         if cond_data is not None:
-            cond_ix = torch.randint(len(cond_data) - C.condition_length, (C.batch_size,))
+            cond_ix = torch.clamp(ix, max=len(cond_data) - C.condition_length)
             cond_x = torch.stack([
                 torch.from_numpy((cond_data[i:i + C.condition_length]).astype(np.int64))
                 for i in cond_ix
