@@ -99,6 +99,12 @@ if __name__ == '__main__':
     else:
         parser.error('Currently only LMDB input is supported')
 
+    num_sequences = len(sequences)
+    print(num_sequences)
+    sequence_lengths = [len(np.asarray(seq).reshape(-1)) for seq in sequences]
+    condition_length = max(sequence_lengths) if sequence_lengths else 0
+    print(condition_length)
+
     train_ids = encode_sequences(train_pairs, tokenizer, stoi, itos)
     train_ids.tofile(os.path.join(args.out_dir, 'train.bin'))
 
@@ -110,6 +116,8 @@ if __name__ == '__main__':
         'stoi': stoi,
         'itos': itos,
         'vocab_size': len(itos),
+        'num_sequences': num_sequences,
+        'condition_length': condition_length,
     }
     with open(os.path.join(args.out_dir, 'meta.pkl'), 'wb') as f:
         pickle.dump(updated_meta, f)
