@@ -144,16 +144,15 @@ if __name__ == "__main__":
         raise Exception("The 'dataset' option is required and cannot be empty")
 
     train_data = np.memmap(os.path.join(C.dataset, "train.bin"), dtype=np.uint16, mode="r")
-    
     val_data = np.memmap(os.path.join(C.dataset, "val.bin"), dtype=np.uint16, mode="r") if C.validate else None
-    #print(len(train_data))
+    print(len(train_data))
     cond_train_data = None
     cond_val_data = None
     if C.condition_dataset:
         cond_train_data = np.memmap(
             os.path.join(C.condition_dataset, "train.bin"), dtype=np.uint16, mode="r"
         )
-        #print(len(train_data))
+        print(len(cond_train_data))
         cond_val_data = (
             np.memmap(os.path.join(C.condition_dataset, "val.bin"), dtype=np.uint16, mode="r")
             if C.validate
