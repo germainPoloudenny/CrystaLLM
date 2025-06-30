@@ -150,13 +150,23 @@ class GPT(nn.Module):
         assert config.block_size is not None
         self.config = config
 
-        self.transformer = nn.ModuleDict(dict(
-            wte=nn.Embedding(config.vocab_size, config.n_embd),
-            wpe=nn.Embedding(config.block_size, config.n_embd),
-            drop=nn.Dropout(config.dropout),
-            h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            ln_f=LayerNorm(config.n_embd, bias=config.bias),
-        ))
+        self.transformer = nn.ModuleDict(
+            dict(
+                wte=nn.Embedding(config.vocab_size, config.n_embd),
+                wpe=nn.Embedding(config.block_size, config.n_embd),
+                drop=nn.Dropout(config.dropout),
+                h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+                ln_f=LayerNorm(config.n_embd, bias=config.bias),
+            )
+        )
+
+        if config.cond_emb_dim > 0:
+            self.cond_embedding = nn.Embedding(
+                config.vocab_size, config.cond_emb_dim
+            )
+            self.cond_proj = nn.Linear(
+                config.cond_emb_dim, config.n_embd, bias=False
+            )
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # https://paperswithcode.com/method/weight-tying
         self.transformer.wte.weight = self.lm_head.weight
@@ -199,6 +209,9 @@ class GPT(nn.Module):
 
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
+        if self.config.cond_emb_dim > 0:
+            cond_emb = self.cond_embedding(idx)
+            tok_emb = tok_emb + self.cond_proj(cond_emb)
         pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (1, t, n_embd)
         x = self.transformer.drop(tok_emb + pos_emb)
         for block in self.transformer.h:
