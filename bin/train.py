@@ -309,20 +309,21 @@ if __name__ == "__main__":
             model.expand_block_size(total_block_size)
             model_args["block_size"] = total_block_size
 
-    if cond_matrix is not None:
-        model.cond_embedding.weight.data.copy_(cond_matrix)
-        model.cond_embedding.weight.requires_grad = False
+    # if cond_matrix is not None:
+    #     model.cond_embedding.weight.data.copy_(cond_matrix)
+    #     model.cond_embedding.weight.requires_grad = False
 
     # crop down the model block size if desired, using model surgery
     if total_block_size < model.config.block_size:
         model.crop_block_size(total_block_size)
         model_args["block_size"] = total_block_size  # so that the checkpoint will have the right value
-    if C.cond_embeddings:
-        for name, param in model.named_parameters():
-            param.requires_grad = False
-    if cond_matrix is not None:
-        for param in model.cond_proj.parameters():
-            param.requires_grad = True
+    # if C.cond_embeddings:
+    #     for name, param in model.named_parameters():
+    #         param.requires_grad = False
+    # if cond_matrix is not None:
+    #     for param in model.cond_proj.parameters():
+    #         param.requires_grad = True
+    
     model.to(C.device)
 
     # initialize a GradScaler; if enabled=False scaler is a no-op

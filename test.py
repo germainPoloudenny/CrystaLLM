@@ -1,19 +1,28 @@
-import os
-import pickle
+import argparse
+from crystallm import embeddings_from_lmdb
 
-cif_dir = "data/tokens_mp20_train_val"          # contient train.bin, starts.pkl, etc.
-cond_dir = "data/tokens_mp20_amp"  # contient train.bin, meta.pkl, etc.
 
-# nombre de structures dans le jeu CIF
-with open(os.path.join(cif_dir, "starts.pkl"), "rb") as f:
-    cif_starts = pickle.load(f)
-num_cif_structures = len(cif_starts)
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Display the dimension of the embeddings stored in an LMDB database.")
+    parser.add_argument(
+        "lmdb_path",
+        help="Path to the LMDB database directory (e.g. data/version_0_last.lmdb)")
+    parser.add_argument(
+        "--sub_db",
+        type=int,
+        default=None,
+        help="Index of a sub-database to read from if applicable")
+    args = parser.parse_args()
 
-# nombre de séquences dans le jeu de conditionnement
-with open(os.path.join(cond_dir, "meta.pkl"), "rb") as f:
-    cond_meta = pickle.load(f)
-num_cond_sequences = cond_meta["num_sequences"]
+    embedding_data = embeddings_from_lmdb(args.lmdb_path, sub_db=args.sub_db)
+    if not embedding_data:
+        raise RuntimeError("LMDB database is empty or not readable")
 
-assert num_cif_structures == num_cond_sequences, \
-    f"taille différente : {num_cif_structures} vs {num_cond_sequences}"
-print("Les deux jeux ont la même taille.")
+    first_vec = next(iter(embedding_data.values()))
+    print(f"Embedding dimension: {len(first_vec)}")
+    print(f"Number of embeddings: {len(embedding_data)}")
+
+
+if __name__ == "__main__":
+    main()
