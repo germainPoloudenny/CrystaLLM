@@ -177,6 +177,13 @@ if __name__ == "__main__":
         val_len = int(len(val_data) * C.dataset_fraction)
         val_data = val_data[:val_len]
 
+    if C.condition_dataset:
+        cond_train_len = int(len(cond_train_data) * C.dataset_fraction)
+        cond_train_data = cond_train_data[:cond_train_len]
+        if cond_val_data is not None:
+            cond_val_len = int(len(cond_val_data) * C.dataset_fraction)
+            cond_val_data = cond_val_data[:cond_val_len]
+
     amp_token_ids = []
 
     cif_start_indices = read_start_indices(
