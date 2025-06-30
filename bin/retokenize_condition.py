@@ -69,12 +69,31 @@ def encode_sequences(cif_list, tokenizer, stoi, itos):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Retokenize dataset with updated meta.pkl')
+    parser = argparse.ArgumentParser(
+        description=(
+            'Retokenize a conditioning dataset using the vocabulary from a ' 
+            'main dataset and split it into train, validation and test sets.'
+        )
+    )
     parser.add_argument('--lmdb_path', required=True, help='LMDB containing CIF strings')
     parser.add_argument('--sub_db', type=int, default=0, help='LMDB sub-database index')
-    parser.add_argument('--train_fraction', type=float, default=0.9, help='Train split fraction when using LMDB')
+    parser.add_argument(
+        '--val_fraction',
+        type=float,
+        default=0.10,
+        help=(
+            'Fraction of the training portion to use for validation. ' 
+            'This is applied after the test split.'
+        ),
+    )
+    parser.add_argument(
+        '--test_fraction',
+        type=float,
+        default=0.0045,
+        help='Fraction of the entire dataset to reserve for testing',
+    )
     parser.add_argument('--meta_path', required=True, help='Path to meta.pkl from main dataset')
-    parser.add_argument('--out_dir', required=True, help='Directory to write train.bin/val.bin')
+    parser.add_argument('--out_dir', required=True, help='Directory to write train.bin/val.bin/test.bin')
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -91,15 +110,18 @@ if __name__ == '__main__':
         if not sequences:
             raise ValueError('LMDB contains no sequences')
 
-        #rng = np.random.default_rng(0)
-        #rng.shuffle(sequences)
-        split_idx = int(len(sequences) * args.train_fraction)
-        train_pairs = sequences[:split_idx]
-        val_pairs = sequences[split_idx:]
+        num_sequences = len(sequences)
+        num_test = int(num_sequences * args.test_fraction)
+        num_train_val = num_sequences - num_test
+        num_val = int(num_train_val * args.val_fraction)
+        num_train = num_train_val - num_val
+
+        train_pairs = sequences[:num_train]
+        val_pairs = sequences[num_train:num_train + num_val]
+        test_pairs = sequences[num_train + num_val:]
     else:
         parser.error('Currently only LMDB input is supported')
 
-    num_sequences = len(sequences)
     print(num_sequences)
     sequence_lengths = [len(np.asarray(seq).reshape(-1)) for seq in sequences]
     condition_length = max(sequence_lengths) if sequence_lengths else 0
@@ -111,6 +133,10 @@ if __name__ == '__main__':
     if val_pairs:
         val_ids = encode_sequences(val_pairs, tokenizer, stoi, itos)
         val_ids.tofile(os.path.join(args.out_dir, 'val.bin'))
+
+    if test_pairs:
+        test_ids = encode_sequences(test_pairs, tokenizer, stoi, itos)
+        test_ids.tofile(os.path.join(args.out_dir, 'test.bin'))
 
     updated_meta = {
         'stoi': stoi,

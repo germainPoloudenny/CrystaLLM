@@ -22,6 +22,7 @@ class GPTConfig:
     n_embd: int = 768
     dropout: float = 0.0
     bias: bool = True
+    cond_emb_dim: int = 0
 
 
 class LayerNorm(nn.Module):
