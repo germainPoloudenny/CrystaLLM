@@ -184,8 +184,6 @@ if __name__ == "__main__":
             cond_val_len = int(len(cond_val_data) * C.dataset_fraction)
             cond_val_data = cond_val_data[:cond_val_len]
 
-    amp_token_ids = []
-
     cif_start_indices = read_start_indices(
         max_start_index=len(train_data) - C.block_size,
         data_dir=C.dataset,
