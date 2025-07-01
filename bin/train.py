@@ -173,14 +173,14 @@ if __name__ == "__main__":
         raise ValueError("dataset_fraction must be in the (0, 1] range")
 
     cif_start_indices = read_start_indices(
-        max_start_index=len(train_data) - C.block_size,
+        max_start_index=len(train_data) - C.block_size - 1,
         data_dir=C.dataset,
         starts_fname="starts.pkl",
         required=True,
     )
 
     cif_start_indices_val = read_start_indices(
-        max_start_index=(len(val_data) - C.block_size) if C.validate else -1,
+        max_start_index=(len(val_data) - C.block_size - 1) if C.validate else -1,
         data_dir=C.dataset,
         starts_fname="starts_val.pkl",
         on_condition=C.validate,
@@ -188,7 +188,7 @@ if __name__ == "__main__":
     )
 
     cif_start_indices_underrep = read_start_indices(
-        max_start_index=len(train_data) - C.block_size,
+        max_start_index=len(train_data) - C.block_size - 1,
         data_dir=C.dataset,
         starts_fname="starts_underrep.pkl",
         on_condition=C.underrep_p > 0,
@@ -204,7 +204,7 @@ if __name__ == "__main__":
             num_train_seq -= 1
         if num_train_seq == 0:
             raise ValueError("No training sequence is long enough for the specified block_size")
-        train_end = int(cif_start_indices[num_train_seq - 1]) + C.block_size
+        train_end = int(cif_start_indices[num_train_seq - 1]) + C.block_size + 1
         cif_start_indices = cif_start_indices[:num_train_seq]
         train_data = train_data[:train_end]
         if cif_start_indices_underrep is not None:
@@ -213,7 +213,7 @@ if __name__ == "__main__":
             cond_train_seq = len(cond_train_data) // C.condition_length
             if cond_train_seq < num_train_seq:
                 num_train_seq = cond_train_seq
-                train_end = int(cif_start_indices[num_train_seq - 1]) + C.block_size
+                train_end = int(cif_start_indices[num_train_seq - 1]) + C.block_size + 1
                 cif_start_indices = cif_start_indices[:num_train_seq]
                 if cif_start_indices_underrep is not None:
                     cif_start_indices_underrep = cif_start_indices_underrep[cif_start_indices_underrep < train_end - C.block_size]
@@ -229,7 +229,7 @@ if __name__ == "__main__":
             num_val_seq -= 1
         if num_val_seq == 0:
             raise ValueError("No validation sequence is long enough for the specified block_size")
-        val_end = int(cif_start_indices_val[num_val_seq - 1]) + C.block_size
+        val_end = int(cif_start_indices_val[num_val_seq - 1]) + C.block_size + 1
         cif_start_indices_val = cif_start_indices_val[:num_val_seq]
         if val_data is not None:
             val_data = val_data[:val_end]
@@ -237,7 +237,7 @@ if __name__ == "__main__":
             cond_val_seq = len(cond_val_data) // C.condition_length
             if cond_val_seq < num_val_seq:
                 num_val_seq = cond_val_seq
-                val_end = int(cif_start_indices_val[num_val_seq - 1]) + C.block_size
+                val_end = int(cif_start_indices_val[num_val_seq - 1]) + C.block_size + 1
                 cif_start_indices_val = cif_start_indices_val[:num_val_seq]
                 if val_data is not None:
                     val_data = val_data[:val_end]
