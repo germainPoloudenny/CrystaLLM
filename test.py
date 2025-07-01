@@ -1,27 +1,52 @@
 import argparse
-from crystallm import embeddings_from_lmdb
+import os
+import pickle
+import numpy as np
+
+
+def verify_split(path: str, condition_length: int) -> int:
+    if not os.path.exists(path):
+        return 0
+    data = np.memmap(path, dtype=np.uint16, mode="r")
+    if len(data) % condition_length != 0:
+        raise AssertionError(
+            f"{os.path.basename(path)} length {len(data)} is not a multiple of {condition_length}"
+        )
+    return len(data) // condition_length
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Display the dimension of the embeddings stored in an LMDB database.")
+        description="Check that all conditioning sequences have the same length",
+    )
     parser.add_argument(
-        "lmdb_path",
-        help="Path to the LMDB database directory (e.g. data/version_0_last.lmdb)")
-    parser.add_argument(
-        "--sub_db",
-        type=int,
-        default=None,
-        help="Index of a sub-database to read from if applicable")
+        "dataset",
+        help="Path to the conditioning dataset directory containing train.bin and meta.pkl",
+    )
     args = parser.parse_args()
 
-    embedding_data = embeddings_from_lmdb(args.lmdb_path, sub_db=args.sub_db)
-    if not embedding_data:
-        raise RuntimeError("LMDB database is empty or not readable")
+    meta_path = os.path.join(args.dataset, "meta.pkl")
+    with open(meta_path, "rb") as f:
+        meta = pickle.load(f)
 
-    first_vec = next(iter(embedding_data.values()))
-    print(f"Embedding dimension: {len(first_vec)}")
-    print(f"Number of embeddings: {len(embedding_data)}")
+    num_sequences = int(meta.get("num_sequences", 0))
+    condition_length = int(meta.get("condition_length", 0))
+    if num_sequences <= 0 or condition_length <= 0:
+        raise ValueError("meta.pkl must contain num_sequences and condition_length > 0")
+
+    total = 0
+    for split in ["train", "val", "test"]:
+        split_path = os.path.join(args.dataset, f"{split}.bin")
+        count = verify_split(split_path, condition_length)
+        if count:
+            print(f"{split} sequences: {count}")
+        total += count
+
+    if total != num_sequences:
+        raise AssertionError(
+            f"meta.pkl reports {num_sequences} sequences but {total} found in .bin files"
+        )
+    print(f"All conditioning sequences verified with length {condition_length} tokens")
 
 
 if __name__ == "__main__":
