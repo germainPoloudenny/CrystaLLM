@@ -210,6 +210,14 @@ if __name__ == "__main__":
         if cif_start_indices_underrep is not None:
             cif_start_indices_underrep = cif_start_indices_underrep[cif_start_indices_underrep < train_end - C.block_size]
         if cond_train_data is not None:
+            cond_train_seq = len(cond_train_data) // C.condition_length
+            if cond_train_seq < num_train_seq:
+                num_train_seq = cond_train_seq
+                train_end = int(cif_start_indices[num_train_seq - 1]) + C.block_size
+                cif_start_indices = cif_start_indices[:num_train_seq]
+                if cif_start_indices_underrep is not None:
+                    cif_start_indices_underrep = cif_start_indices_underrep[cif_start_indices_underrep < train_end - C.block_size]
+                train_data = train_data[:train_end]
             cond_train_data = cond_train_data[: num_train_seq * C.condition_length]
 
     val_end = len(val_data) if val_data is not None else 0
@@ -226,6 +234,13 @@ if __name__ == "__main__":
         if val_data is not None:
             val_data = val_data[:val_end]
         if cond_val_data is not None:
+            cond_val_seq = len(cond_val_data) // C.condition_length
+            if cond_val_seq < num_val_seq:
+                num_val_seq = cond_val_seq
+                val_end = int(cif_start_indices_val[num_val_seq - 1]) + C.block_size
+                cif_start_indices_val = cif_start_indices_val[:num_val_seq]
+                if val_data is not None:
+                    val_data = val_data[:val_end]
             cond_val_data = cond_val_data[: num_val_seq * C.condition_length]
 
     # mapping from CIF start indices to sequence id
