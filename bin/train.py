@@ -188,6 +188,7 @@ if __name__ == "__main__":
         max_start_index=len(train_data) - C.block_size,
         data_dir=C.dataset,
         starts_fname="starts.pkl",
+        required=True
     )
 
     cif_start_indices_val = read_start_indices(
@@ -195,6 +196,7 @@ if __name__ == "__main__":
         data_dir=C.dataset,
         starts_fname="starts_val.pkl",
         on_condition=C.validate,
+        required=True
     )
 
     cif_start_indices_underrep = read_start_indices(
@@ -204,6 +206,14 @@ if __name__ == "__main__":
         on_condition=C.underrep_p > 0,
         required=True,
     )
+
+    # mapping from CIF start indices to sequence id
+    cif_to_seq = None
+    cif_to_seq_val = None
+    if cif_start_indices is not None:
+        cif_to_seq = {int(s): idx for idx, s in enumerate(cif_start_indices.tolist())}
+    if cif_start_indices_val is not None:
+        cif_to_seq_val = {int(s): idx for idx, s in enumerate(cif_start_indices_val.tolist())}
 
     def get_batch(split):
         data = train_data if split == "train" else val_data
@@ -222,7 +232,14 @@ if __name__ == "__main__":
         y = torch.stack([torch.from_numpy((data[i + 1:i + 1 + C.block_size]).astype(np.int64)) for i in ix])
 
         if cond_data is not None:
-            cond_ix = torch.randint(len(cond_data) - C.condition_length, (C.batch_size,))
+            if split == "train" and cif_to_seq is not None:
+                cond_ix = [cif_to_seq.get(int(i), 0) * C.condition_length for i in ix]
+            elif split != "train" and cif_to_seq_val is not None:
+                cond_ix = [cif_to_seq_val.get(int(i), 0) * C.condition_length for i in ix]
+            else:
+                cond_ix = torch.randint(len(cond_data) - C.condition_length, (C.batch_size,))
+            if not torch.is_tensor(cond_ix):
+                cond_ix = torch.tensor(cond_ix, dtype=torch.long)
             cond_x = torch.stack([
                 torch.from_numpy((cond_data[i:i + C.condition_length]).astype(np.int64))
                 for i in cond_ix

@@ -27,6 +27,9 @@ if __name__ == "__main__":
     parser.add_argument("--out_fname", type=str, required=True,
                         help="Path to the file that will contain the serialized Python list of start indices. "
                              "Recommended extension is `.pkl`.")
+    parser.add_argument("--split", type=str, default="train",
+                        choices=["train", "val", "test"],
+                        help="Dataset split to extract start indices from.")
     parser.add_argument("--underrepresented_fname", type=str, default=None,
                         help="Optional: Path to the file containing underrepresented sample information. "
                              "The file should be .pkl file with a serialized Python list of "
@@ -38,6 +41,7 @@ if __name__ == "__main__":
 
     dataset_fname = args.dataset_fname
     out_fname = args.out_fname
+    split = args.split
     underrepresented_fname = args.underrepresented_fname
     underrepresented_out_fname = args.underrepresented_out_fname
 
@@ -48,8 +52,8 @@ if __name__ == "__main__":
         file_content_byte = file.extractfile(f"{base_path}/meta.pkl").read()
         meta = pickle.loads(file_content_byte)
 
-        extracted = file.extractfile(f"{base_path}/train.bin")
-        train_ids = np.frombuffer(extracted.read(), dtype=np.uint16)
+        extracted = file.extractfile(f"{base_path}/{split}.bin")
+        token_ids = np.frombuffer(extracted.read(), dtype=np.uint16)
 
     underrepresented_set = None
     if underrepresented_fname:
@@ -60,7 +64,7 @@ if __name__ == "__main__":
 
     curr_cif_tokens = []
 
-    for i, id in tqdm(enumerate(train_ids), total=len(train_ids), desc="identifying starts..."):
+    for i, id in tqdm(enumerate(token_ids), total=len(token_ids), desc=f"identifying starts in {split}..."):
         token = meta["itos"][id]
 
         if token == "data_":
@@ -81,7 +85,7 @@ if __name__ == "__main__":
 
             curr_cif_tokens = []
 
-    print("writing start indices...")
+    print(f"writing start indices for {split}...")
     with open(out_fname, "wb") as f:
         pickle.dump(all_cif_start_indices, f, protocol=pickle.HIGHEST_PROTOCOL)
 
