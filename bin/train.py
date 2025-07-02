@@ -39,7 +39,6 @@ class TrainDefaults:
     # data
     dataset: str = ""  # the path to the folder containing the .bin files with encoded tokens
     cond_embeddings: str = ""  # LMDB file with conditioning embeddings
-    cond_emb_dim: int = 0  # LMDB file with conditioning embeddings
     condition_dataset: str = ""  # optional dataset with conditioning tokens
     condition_length: int = 0  # length of conditioning prefix
     dataset_fraction: float = 1.0  # proportion of the dataset to use

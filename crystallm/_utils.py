@@ -242,7 +242,7 @@ def embeddings_from_lmdb(
     *,
     dtype=None,
     shape=None,
-    sub_db=None,
+    sub_db=2,
 ):
     """Load embeddings from an LMDB database.
 
