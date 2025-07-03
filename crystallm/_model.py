@@ -212,7 +212,12 @@ class GPT(nn.Module):
         tok_emb = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
         if self.config.cond_emb_dim > 0:
             cond_emb = self.cond_embedding(idx)
-            tok_emb = tok_emb + self.cond_proj(cond_emb)
+            proj_emb = self.cond_proj(cond_emb)
+            if targets is not None:
+                cond_mask = (targets == -1).unsqueeze(-1)
+                tok_emb = torch.where(cond_mask, proj_emb, tok_emb)
+            else:
+                tok_emb = proj_emb
         pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (1, t, n_embd)
         x = self.transformer.drop(tok_emb + pos_emb)
         for block in self.transformer.h:
